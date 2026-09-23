@@ -93,8 +93,9 @@ namespace SsshmulDownloader.Engine
             args.Add(isPlaylist ? "%(playlist)s/%(playlist_index)s - " + outputTemplate : outputTemplate);
             args.Add(isPlaylist ? "--yes-playlist" : "--no-playlist");
 
-            // Subtitle extraction flags
-            if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang))
+            // Subtitle extraction flags - only for video formats!
+            bool isAudio = formatId == "mp3_high" || formatId == "mp3_medium" || formatId == "raw_audio" || formatId == "generic_audio";
+            if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang) && !isAudio)
             {
                 string subLang = subs.Lang.Trim();
                 if (subLang == "he,en") subLang = "he.*,iw.*,en.*";
@@ -111,6 +112,8 @@ namespace SsshmulDownloader.Engine
                 args.Add("srt/vtt/best");
                 args.Add("--ignore-no-formats-error");
                 args.Add("--no-abort-on-error");
+                args.Add("--compat-options");
+                args.Add("no-abort-on-error");
 
                 if (subs.Type == "embed")
                 {
@@ -135,7 +138,7 @@ namespace SsshmulDownloader.Engine
                 switch (fmt)
                 {
                     case "mp3_high":
-                        args.Add("-f"); args.Add("bestaudio");
+                        args.Add("-f"); args.Add("bestaudio/best");
                         args.Add("--extract-audio");
                         args.Add("--audio-format"); args.Add("mp3");
                         args.Add("--audio-quality"); args.Add("0");
@@ -144,7 +147,7 @@ namespace SsshmulDownloader.Engine
                         args.Add("--add-metadata");
                         break;
                     case "mp3_medium":
-                        args.Add("-f"); args.Add("bestaudio");
+                        args.Add("-f"); args.Add("bestaudio/best");
                         args.Add("--extract-audio");
                         args.Add("--audio-format"); args.Add("mp3");
                         args.Add("--audio-quality"); args.Add("5");
@@ -153,7 +156,7 @@ namespace SsshmulDownloader.Engine
                         args.Add("--add-metadata");
                         break;
                     case "raw_audio":
-                        args.Add("-f"); args.Add("bestaudio");
+                        args.Add("-f"); args.Add("bestaudio/best");
                         args.Add("--embed-metadata");
                         args.Add("--add-metadata");
                         break;

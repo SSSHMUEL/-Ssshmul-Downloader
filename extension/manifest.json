@@ -37,15 +37,5 @@
   },
   "icons": {
     "48": "icon.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "icon_mini.png"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  }
 }

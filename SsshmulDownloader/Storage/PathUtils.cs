@@ -46,6 +46,13 @@ namespace SsshmulDownloader.Storage
             {
                 return webDir;
             }
+
+            string devWebDir = Path.GetFullPath(Path.Combine(baseDir, @"..\..\..\web"));
+            if (Directory.Exists(devWebDir))
+            {
+                return devWebDir;
+            }
+
             return baseDir;
         }
 

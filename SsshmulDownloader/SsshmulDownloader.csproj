@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>..\icon.ico</ApplicationIcon>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
     <AssemblyName>SsshmulDownloader</AssemblyName>
     <RootNamespace>SsshmulDownloader</RootNamespace>
     <Version>1.0.0</Version>
@@ -25,15 +25,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\icon.ico" Link="icon.ico">
+    <Content Include="icon.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="..\bin_tools\**\*">
       <Link>bin_tools\%(RecursiveDir)%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="..\web\**\*">
-      <Link>web\%(RecursiveDir)%(FileName)%(Extension)</Link>
+    <Content Include="web\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="..\extension\**\*">

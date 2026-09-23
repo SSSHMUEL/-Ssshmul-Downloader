@@ -357,7 +357,7 @@ function handleServerMessage(data) {
                 activeDownloads[taskId] = {
                     id: taskId,
                     title: task.title || 'מוריד מדיה...',
-                    thumbnail: task.thumbnail || 'icon_mini.png',
+                    thumbnail: task.thumbnail || 'icon.png',
                     percent: task.lastPercent || '0',
                     speed: task.lastSpeed || '',
                     isPaused: task.isPaused === true || task.currentState === 'paused'
@@ -426,7 +426,7 @@ function handleServerMessage(data) {
         activeDownloads[downloadId] = {
             id: downloadId,
             title: title || 'מוריד מדיה...',
-            thumbnail: thumbnail || 'icon_mini.png',
+            thumbnail: thumbnail || 'icon.png',
             percent: percent || '0',
             speed: speed || '',
             isPaused: false
@@ -505,13 +505,7 @@ function handleServerMessage(data) {
         
         let friendlyErr = error || 'ההורדה נכשלה';
         if (friendlyErr.includes('subtitles') && (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests') || friendlyErr.includes('HTTP Error'))) {
-            friendlyErr = 'השיר ירד! (הורדת הכתוביות נכשלה זמנית מיוטיוב ⚠️)';
-            fill.style.background = '#f59e0b';
-            percentEl.textContent = 'הושלם';
-            statusDesc.textContent = friendlyErr;
-            statusDesc.style.color = '#f59e0b';
-            speedEl.textContent = '';
-            return;
+            friendlyErr = 'הורדת הכתוביות נכשלה (חסימת עומס 429 מיוטיוב ⚠️)';
         } else if (friendlyErr.includes('Blocked by NetFree') || friendlyErr.includes('418')) {
             friendlyErr = 'הסרטון חסום בנטפרי 🔒';
         } else if (friendlyErr.includes('unable to extract') || friendlyErr.includes('ffprobe') || friendlyErr.includes('PO Token')) {
@@ -755,7 +749,7 @@ function renderDownloadItem(item) {
     div.className = 'download-item';
     div.innerHTML = `
         <div class="download-item-top">
-            <img class="item-thumb" src="${item.thumbnail}" alt="Thumb" onerror="this.src='icon_mini.png'">
+            <img class="item-thumb" src="${item.thumbnail}" alt="Thumb" onerror="this.src='icon.png'">
             <div class="item-meta">
                 <span class="item-title">${item.title}</span>
                 <div class="item-status-row">
@@ -822,7 +816,7 @@ function addVideoToPlaylist(url, title, thumbnail, domain, channel = '') {
         id: Date.now().toString(36) + Math.random().toString(36).substr(2),
         url: url,
         title: title || 'סרטון לא ידוע',
-        thumbnail: thumbnail || 'icon_mini.png',
+        thumbnail: thumbnail || 'icon.png',
         domain: domain || 'Unknown',
         channel: channel || ''
     };
@@ -1427,7 +1421,7 @@ function renderPlaylist() {
         div.className = 'playlist-item';
         div.innerHTML = `
             <div class="playlist-item-top">
-                <img class="playlist-thumb" src="${video.thumbnail}" alt="Thumb" onerror="this.src='icon_mini.png'">
+                <img class="playlist-thumb" src="${video.thumbnail}" alt="Thumb" onerror="this.src='icon.png'">
                 <div class="playlist-meta">
                     <span class="playlist-title">${video.title}</span>
                     <span class="playlist-domain">${video.domain}</span>
@@ -1549,7 +1543,7 @@ async function fetchArtistDiscographyFromItunes(query) {
                 cleanTitle: `${artistName} ${trackName}`,
                 artist: artistName,
                 trackName: trackName,
-                thumbnail: artwork || 'icon_mini.png',
+                thumbnail: artwork || 'icon.png',
                 duration: durationStr
             });
         }
@@ -1916,7 +1910,7 @@ function renderSearchResults() {
             <div class="search-item-checkbox">
                 <input type="checkbox" data-index="${index}" ${item.selected ? 'checked' : ''}>
             </div>
-            <img class="search-item-thumb" src="${item.thumbnail}" alt="Thumb" onerror="this.src='icon_mini.png'">
+            <img class="search-item-thumb" src="${item.thumbnail}" alt="Thumb" onerror="this.src='icon.png'">
             <div class="search-item-meta">
                 <span class="search-item-title" title="${item.title}">${item.title}</span>
                 <span class="search-item-channel">${item.channel} ${item.duration ? `• ${item.duration}` : ''}</span>
@@ -2051,7 +2045,7 @@ async function detectCurrentTab() {
                 if (detectedMedia.thumbnail) {
                     mediaThumb.src = detectedMedia.thumbnail;
                 } else {
-                    mediaThumb.src = 'icon_mini.png';
+                    mediaThumb.src = 'icon.png';
                 }
                 mediaDomain.textContent = isYt ? 'YouTube' : 'Netube';
                 // Don't show media preview since we auto-add to playlist instead
@@ -2253,7 +2247,7 @@ async function proceedDownload(url) {
     activeDownloads[downloadId] = {
         id: downloadId,
         title: finalTitle || 'מוריד...',
-        thumbnail: finalThumbnail || 'icon_mini.png',
+        thumbnail: finalThumbnail || 'icon.png',
         percent: '0',
         speed: ''
     };

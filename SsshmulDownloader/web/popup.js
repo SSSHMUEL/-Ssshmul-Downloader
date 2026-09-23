@@ -665,13 +665,7 @@ function handleServerMessage(data) {
         
         let friendlyErr = error || 'ההורדה נכשלה';
         if (friendlyErr.includes('subtitles') && (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests') || friendlyErr.includes('HTTP Error'))) {
-            friendlyErr = 'השיר ירד! (הורדת הכתוביות נכשלה זמנית מיוטיוב ⚠️)';
-            fill.style.background = '#f59e0b';
-            percentEl.textContent = 'הושלם';
-            statusDesc.textContent = friendlyErr;
-            statusDesc.style.color = '#f59e0b';
-            speedEl.textContent = '';
-            return;
+            friendlyErr = 'הורדת הכתוביות נכשלה (חסימת עומס 429 מיוטיוב ⚠️)';
         } else if (friendlyErr.includes('Blocked by NetFree') || friendlyErr.includes('418')) {
             friendlyErr = 'הסרטון חסום בנטפרי 🔒';
         } else if (friendlyErr.includes('unable to extract') || friendlyErr.includes('ffprobe') || friendlyErr.includes('PO Token')) {
@@ -1621,7 +1615,7 @@ async function proceedSingleDownload(video) {
         playlist: false,
         qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
         cookies: cookies || null,
-        downloadSubs: storage.downloadSubsDefault === true,
+        downloadSubs: isVideo && storage.downloadSubsDefault === true,
         subsLang: storage.subsLangDefault || 'he',
         subsType: storage.subsTypeDefault || 'separate',
         tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
@@ -2489,7 +2483,7 @@ async function proceedDownloadAll() {
             playlist: false,
             qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
             cookies: cookies || null,
-            downloadSubs: storage.downloadSubsDefault === true,
+            downloadSubs: isVideo && storage.downloadSubsDefault === true,
             subsLang: storage.subsLangDefault || 'he',
             subsType: storage.subsTypeDefault || 'separate',
             tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
@@ -2575,7 +2569,7 @@ async function proceedDownload(url) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (storage.downloadSubsDefault === true) {
+    if (isVideo && storage.downloadSubsDefault === true) {
         fetchAndDownloadSubtitlesFromUrl(finalUrl, finalTitle);
     }
 
@@ -2591,7 +2585,7 @@ async function proceedDownload(url) {
         playlist: false,
         qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
         cookies: cookies || null,
-        downloadSubs: storage.downloadSubsDefault === true,
+        downloadSubs: isVideo && storage.downloadSubsDefault === true,
         subsLang: storage.subsLangDefault || 'he',
         subsType: storage.subsTypeDefault || 'separate',
         tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null

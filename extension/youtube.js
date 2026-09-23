@@ -3,10 +3,13 @@ const userLang = navigator.language.startsWith('he') ? 'he' : 'en';
 const i18n = {
     en: {
         btnText: "Download",
-        btnMp3Text: "🎵 Audio (MP3)",
-        btnMp4Text: "🎬 Video (MP4)",
+        btnMp3Text: "Audio",
+        btnMp4Text: "Video",
         btnVideoText: "Download Video",
         btnClipText: "Download Video",
+        preparing: "Starting...",
+        completed: "Done!",
+        error: "Error",
         downloadingMp3: "🚀 Starting MP3 download in background...",
         downloadingMp4: "🚀 Starting MP4 download in background...",
         subsDownloaded: "📝 Subtitles (.srt) downloaded!",
@@ -15,10 +18,13 @@ const i18n = {
     },
     he: {
         btnText: "הורד",
-        btnMp3Text: "🎵 שמע (MP3)",
-        btnMp4Text: "🎬 וידאו (MP4)",
+        btnMp3Text: "שמע",
+        btnMp4Text: "וידאו",
         btnVideoText: "הורד וידאו",
         btnClipText: "הורד סרטון",
+        preparing: "מתחיל...",
+        completed: "הושלם!",
+        error: "שגיאה",
         downloadingMp3: "🚀 הורדת MP3 החלה ברקע...",
         downloadingMp4: "🚀 הורדת MP4 החלה ברקע...",
         subsDownloaded: "📝 כתוביות (SRT) ירדו בהצלחה!",
@@ -32,6 +38,10 @@ document.addEventListener('play', (e) => { if (e.target.tagName === 'VIDEO') las
 document.addEventListener('loadstart', (e) => { if (e.target.tagName === 'VIDEO') lastActiveVideo = e.target; }, true);
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'download_ws_event' && request.data) {
+        handleDownloadWsEvent(request.data);
+    }
+
     if (request.action === 'bind_new_media' && lastActiveVideo) {
         lastActiveVideo.dataset.sniffedUrl = request.url;
     }
@@ -590,7 +600,7 @@ function getTargetUrlAndMetadata(isNetube, btn) {
 }
 
 // Trigger direct download action
-function executeDownload(format, isNetube, btn) {
+function executeDownload(format, isNetube, btn, customDownloadId) {
     const data = getTargetUrlAndMetadata(isNetube, btn);
 
     chrome.storage.local.get(['downloadSubsDefault'], (res) => {
@@ -607,6 +617,7 @@ function executeDownload(format, isNetube, btn) {
 
     chrome.runtime.sendMessage({
         action: 'direct_download',
+        downloadId: customDownloadId || null,
         format: format,
         url: data.url,
         directUrl: data.directUrl,
@@ -615,7 +626,17 @@ function executeDownload(format, isNetube, btn) {
         channel: data.channel || ''
     }, (res) => {
         if (!res || !res.success) {
-            // showToast(i18n.appNotRunning, true);
+            if (btn && btn.resetState) {
+                const iconSpan = btn.querySelector('.nf-btn-icon');
+                const textSpan = btn.querySelector('.nf-btn-text');
+                btn.classList.remove('is-starting', 'is-downloading');
+                btn.classList.add('is-error');
+                if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#e74c3c" focusable="false" style="display:block;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+                if (textSpan) textSpan.textContent = i18n.error;
+                setTimeout(() => {
+                    btn.resetState();
+                }, 3500);
+            }
         }
     });
 }
@@ -945,10 +966,15 @@ function tryInjectButton() {
 
     if (!actionBar || document.querySelector('#nf-download-btn') || document.querySelector('#nf-download-buttons')) return;
 
-    // YouTube-style icons matching native SVGs
-    const videoIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
-    const downloadIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
-    const audioIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg>`;
+    // Crisp YouTube native SVG icons
+    const videoIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
+    const audioIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
+    const downloadIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+    const animArrowIcon = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+    const checkIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
+    const errorIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+
+    ensureYtStyles();
 
     if (isNetube) {
         const mainBtn = document.createElement('button');
@@ -979,86 +1005,245 @@ function tryInjectButton() {
         const channelAvatar = actionBar.querySelector('#video-ch-avatar-main');
         if (channelAvatar) channelAvatar.after(mainBtn); else actionBar.prepend(mainBtn);
     } else {
-        // YouTube native style button group (like Like/Dislike/Share pill buttons)
-        const isDark = document.documentElement.getAttribute('dark') !== null || !document.body.classList.contains('light-theme');
-        const bgNormal = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
-        const bgHover = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
-        const textColor = isDark ? '#f1f1f1' : '#0f0f0f';
-
+        // YouTube native style button container (Only Video & Audio buttons)
         const btnContainer = document.createElement('div');
         btnContainer.id = 'nf-download-buttons';
-        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 6px; margin-inline-end: 6px; height: 36px;`;
+        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 6px; margin-inline-end: 6px; height: 36px; vertical-align: middle;`;
 
-        function createYouTubeButton(icon, title, text, onClick) {
+        function createYtNativeButton(defaultIconSvg, defaultText, format) {
             const btn = document.createElement('button');
-            btn.style.cssText = `
-                background-color: ${bgNormal};
-                color: ${textColor};
-                border: none;
-                border-radius: 18px;
-                height: 36px;
-                padding: ${text ? '0 14px' : '0 10px'};
-                font-family: "Roboto", "Arial", sans-serif;
-                font-size: 13.5px;
-                font-weight: 500;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                gap: 6px;
-                cursor: pointer;
-                transition: background-color 0.2s;
-                box-sizing: border-box;
-                vertical-align: middle;
-                white-space: nowrap;
-            `;
-            btn.innerHTML = `${icon}${text ? `<span>${text}</span>` : ''}`;
-            btn.title = title;
-            
-            btn.onmouseover = () => btn.style.backgroundColor = bgHover;
-            btn.onmouseout = () => btn.style.backgroundColor = bgNormal;
-            
+            btn.className = `nf-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m`;
+            btn.setAttribute('data-format', format);
+            btn.title = `${defaultText} (${format.toUpperCase()})`;
+
+            const progressFill = document.createElement('div');
+            progressFill.className = 'nf-progress-fill';
+
+            const content = document.createElement('span');
+            content.className = 'nf-btn-content';
+
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'nf-btn-icon';
+            iconSpan.innerHTML = defaultIconSvg;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'nf-btn-text';
+            textSpan.textContent = defaultText;
+
+            content.appendChild(iconSpan);
+            content.appendChild(textSpan);
+
+            btn.appendChild(progressFill);
+            btn.appendChild(content);
+
+            btn.resetState = () => {
+                delete btn.dataset.activeDownloadId;
+                btn.classList.remove('is-starting', 'is-downloading', 'is-completed', 'is-error');
+                progressFill.style.width = '0%';
+                iconSpan.innerHTML = defaultIconSvg;
+                textSpan.textContent = defaultText;
+            };
+
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onClick(btn);
+
+                if (btn.classList.contains('is-starting') || btn.classList.contains('is-downloading')) {
+                    return;
+                }
+
+                const downloadId = 'dl_yt_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                btn.dataset.activeDownloadId = downloadId;
+
+                // State 1: Starting/Preparing feedback (Animated downward bouncing arrow + text)
+                btn.classList.add('is-starting');
+                btn.classList.remove('is-downloading', 'is-completed', 'is-error');
+                iconSpan.innerHTML = animArrowIcon;
+                textSpan.textContent = i18n.preparing;
+                progressFill.style.width = '0%';
+
+                executeDownload(format, false, btn, downloadId);
             });
-            
+
             return btn;
         }
 
-        // Video button
-        const videoBtn = createYouTubeButton(videoIcon, i18n.btnMp4Text, 'וידאו', (btn) => {
-            executeDownload('mp4', false, btn);
-        });
+        // 1. Video button (MP4)
+        const videoBtn = createYtNativeButton(videoIcon, i18n.btnMp4Text, 'mp4');
 
-        // Audio button
-        const audioBtn = createYouTubeButton(audioIcon, i18n.btnMp3Text, 'שמע', (btn) => {
-            executeDownload('mp3', false, btn);
-        });
-
-        // Download dropdown button
-        const downloadBtn = createYouTubeButton(downloadIcon, i18n.btnText, '', (btn) => {
-            const menu = getOrCreateGlobalMenu();
-            currentActiveBtn = btn;
-
-            const isVisible = menu.style.display === 'flex';
-            if (isVisible) {
-                menu.style.display = 'none';
-            } else {
-                const rect = btn.getBoundingClientRect();
-                menu.style.top = `${rect.bottom + 6}px`;
-                const leftPos = Math.max(10, rect.right - 180);
-                menu.style.left = `${leftPos}px`;
-                menu.style.display = 'flex';
-            }
-        });
+        // 2. Audio button (MP3)
+        const audioBtn = createYtNativeButton(audioIcon, i18n.btnMp3Text, 'mp3');
 
         btnContainer.appendChild(videoBtn);
         btnContainer.appendChild(audioBtn);
-        btnContainer.appendChild(downloadBtn);
 
         actionBar.prepend(btnContainer);
     }
+}
+
+function ensureYtStyles() {
+    if (document.getElementById('nf-yt-custom-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'nf-yt-custom-styles';
+    style.textContent = `
+        @keyframes nf-arrow-down {
+            0% { transform: translateY(-3px); opacity: 0.75; }
+            50% { transform: translateY(3px); opacity: 1; }
+            100% { transform: translateY(-3px); opacity: 0.75; }
+        }
+        @keyframes nf-pulse-subtle {
+            0%, 100% { opacity: 0.95; }
+            50% { opacity: 0.65; }
+        }
+        .nf-anim-arrow {
+            animation: nf-arrow-down 0.85s infinite ease-in-out !important;
+            display: inline-block !important;
+        }
+        .nf-yt-btn {
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 6px !important;
+            height: 36px !important;
+            border-radius: 18px !important;
+            border: none !important;
+            padding: 0 14px !important;
+            font-family: "Roboto", "YouTube Sans", system-ui, -apple-system, sans-serif !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            cursor: pointer !important;
+            box-sizing: border-box !important;
+            vertical-align: middle !important;
+            white-space: nowrap !important;
+            user-select: none !important;
+            overflow: hidden !important;
+            transition: background-color 0.2s cubic-bezier(0.05, 0, 0, 1), transform 0.15s ease, color 0.2s !important;
+            margin: 0 !important;
+            line-height: 1 !important;
+            outline: none !important;
+            text-decoration: none !important;
+        }
+        /* YouTube Light & Dark Modes */
+        html:not([dark]) .nf-yt-btn {
+            background-color: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05)) !important;
+            color: var(--yt-spec-text-primary, #0f0f0f) !important;
+        }
+        html:not([dark]) .nf-yt-btn:hover:not(:disabled) {
+            background-color: var(--yt-spec-button-chip-background-hover, rgba(0, 0, 0, 0.1)) !important;
+        }
+        html:not([dark]) .nf-yt-btn:active:not(:disabled) {
+            background-color: rgba(0, 0, 0, 0.15) !important;
+            transform: scale(0.96) !important;
+        }
+
+        html[dark] .nf-yt-btn, body[dark] .nf-yt-btn, ytd-app[dark] .nf-yt-btn {
+            background-color: var(--yt-spec-badge-chip-background, rgba(255, 255, 255, 0.1)) !important;
+            color: var(--yt-spec-text-primary, #f1f1f1) !important;
+        }
+        html[dark] .nf-yt-btn:hover:not(:disabled), body[dark] .nf-yt-btn:hover:not(:disabled), ytd-app[dark] .nf-yt-btn:hover:not(:disabled) {
+            background-color: var(--yt-spec-button-chip-background-hover, rgba(255, 255, 255, 0.2)) !important;
+        }
+        html[dark] .nf-yt-btn:active:not(:disabled), body[dark] .nf-yt-btn:active:not(:disabled), ytd-app[dark] .nf-yt-btn:active:not(:disabled) {
+            background-color: rgba(255, 255, 255, 0.25) !important;
+            transform: scale(0.96) !important;
+        }
+
+        .nf-yt-btn .nf-progress-fill {
+            position: absolute !important;
+            top: 0 !important;
+            bottom: 0 !important;
+            right: 0 !important;
+            width: 0%;
+            height: 100% !important;
+            background: linear-gradient(270deg, rgba(62, 166, 255, 0.35), rgba(62, 166, 255, 0.18)) !important;
+            border-radius: 18px !important;
+            pointer-events: none !important;
+            transition: width 0.25s ease-out !important;
+            z-index: 1 !important;
+        }
+        [dir="ltr"] .nf-yt-btn .nf-progress-fill {
+            right: auto !important;
+            left: 0 !important;
+            background: linear-gradient(90deg, rgba(62, 166, 255, 0.35), rgba(62, 166, 255, 0.18)) !important;
+        }
+
+        .nf-yt-btn .nf-btn-content {
+            position: relative !important;
+            z-index: 2 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 6px !important;
+            pointer-events: none !important;
+            white-space: nowrap !important;
+        }
+
+        .nf-yt-btn.is-starting .nf-btn-content {
+            animation: nf-pulse-subtle 1.2s infinite ease-in-out !important;
+        }
+
+        .nf-yt-btn.is-completed {
+            background-color: rgba(43, 166, 64, 0.15) !important;
+            color: #2ba640 !important;
+            border: 1px solid rgba(43, 166, 64, 0.3) !important;
+        }
+        .nf-yt-btn.is-completed .nf-progress-fill {
+            display: none !important;
+        }
+
+        .nf-yt-btn.is-error {
+            background-color: rgba(231, 76, 60, 0.15) !important;
+            color: #e74c3c !important;
+            border: 1px solid rgba(231, 76, 60, 0.3) !important;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+}
+
+function handleDownloadWsEvent(data) {
+    if (!data) return;
+    const { type, downloadId, percent } = data;
+
+    const buttons = document.querySelectorAll('.nf-yt-btn');
+    buttons.forEach((btn) => {
+        if (!btn.dataset.activeDownloadId) return;
+        if (downloadId && btn.dataset.activeDownloadId !== downloadId) return;
+
+        const progressFill = btn.querySelector('.nf-progress-fill');
+        const iconSpan = btn.querySelector('.nf-btn-icon');
+        const textSpan = btn.querySelector('.nf-btn-text');
+
+        if (type === 'progress') {
+            btn.classList.remove('is-starting');
+            btn.classList.add('is-downloading');
+            const pct = Math.min(100, Math.max(0, Math.round(parseFloat(percent) || 0)));
+            if (progressFill) progressFill.style.width = `${pct}%`;
+            if (iconSpan && !iconSpan.querySelector('.nf-anim-arrow')) {
+                iconSpan.innerHTML = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+            }
+            if (textSpan) textSpan.textContent = `${pct}%`;
+        } else if (type === 'completed') {
+            btn.classList.remove('is-starting', 'is-downloading');
+            btn.classList.add('is-completed');
+            if (progressFill) progressFill.style.width = '100%';
+            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
+            if (textSpan) textSpan.textContent = i18n.completed;
+
+            setTimeout(() => {
+                if (btn.resetState) btn.resetState();
+            }, 3500);
+        } else if (type === 'error') {
+            btn.classList.remove('is-starting', 'is-downloading');
+            btn.classList.add('is-error');
+            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+            if (textSpan) textSpan.textContent = i18n.error;
+
+            setTimeout(() => {
+                if (btn.resetState) btn.resetState();
+            }, 3500);
+        }
+    });
 }
 
 function injectIframeButton(iframe) {
@@ -1073,7 +1258,7 @@ function injectIframeButton(iframe) {
     if (parentStyle.position === 'static') wrapper.style.position = 'relative';
 
     const btn = document.createElement('button');
-    const dlIconSmall = `<img src="${chrome.runtime.getURL('icon_mini.png')}" style="width: 16px; height: 16px; flex-shrink: 0; object-fit: contain; margin: 0; padding: 0; background: transparent !important;">`;
+    const dlIconSmall = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="flex-shrink: 0;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
     btn.innerHTML = `${dlIconSmall}<span style="font-size: 12px; font-weight: 600; line-height: 1; color: #ecf0f1;">${i18n.btnClipText}</span>`;
 
     btn.style.cssText = `background: rgba(44, 62, 80, 0.95); color: #ecf0f1; border: 1px solid #34495e; border-radius: 6px; padding: 4px 10px; font-family: 'Varela Round', system-ui, sans-serif; display: flex; align-items: center; gap: 5px; cursor: pointer; opacity: 0.85; box-shadow: 0 2px 5px rgba(0,0,0,0.5); transition: opacity 0.2s, background 0.2s, transform 0.2s; outline: none;`;
@@ -1105,7 +1290,7 @@ function injectSingleGenericButton(videoEl) {
     btn.className = 'nf-generic-btn';
     btn.videoRef = videoEl;
 
-    const dlIconSmall = `<img src="${chrome.runtime.getURL('icon_mini.png')}" style="width: 16px; height: 16px; flex-shrink: 0; object-fit: contain; margin: 0; padding: 0; background: transparent !important; border: none !important; box-shadow: none !important;">`;
+    const dlIconSmall = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="flex-shrink: 0;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
     btn.innerHTML = `${dlIconSmall}<span class="nf-btn-text" style="font-size: 12px; font-weight: 600; line-height: 1;">${i18n.btnVideoText}</span>`;
     btn.style.cssText = `position: absolute; top: 8px; right: 8px; z-index: 9999; background: rgba(44, 62, 80, 0.95); color: #ecf0f1; border: 1px solid #34495e; border-radius: 6px; padding: 4px 8px; font-family: 'Varela Round', system-ui, sans-serif; display: flex; align-items: center; gap: 5px; direction: rtl; cursor: pointer; opacity: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: opacity 0.2s, background 0.2s, transform 0.2s;`;
 

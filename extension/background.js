@@ -179,7 +179,7 @@ async function sendViaWebSocket(req, retryOnFail = true) {
         ? (storage.savedMp4Quality || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best') 
         : (storage.savedMp3Quality || 'mp3_high');
 
-    const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    const downloadId = req.downloadId || (Date.now().toString(36) + Math.random().toString(36).substr(2));
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
@@ -199,6 +199,15 @@ async function sendViaWebSocket(req, retryOnFail = true) {
 
     const trySend = () => {
         return new Promise((resolve) => {
+            initPersistentWs();
+            if (persistentWs && persistentWs.readyState === WebSocket.OPEN) {
+                try {
+                    persistentWs.send(JSON.stringify(msg));
+                    resolve(true);
+                    return;
+                } catch (e) { }
+            }
+
             try {
                 const ws = new WebSocket('ws://localhost:9595/ws');
                 const timer = setTimeout(() => {
@@ -236,7 +245,7 @@ async function sendViaWebSocket(req, retryOnFail = true) {
             if (sent) break;
         }
     }
-    return sent;
+    return { success: !!sent, downloadId };
 }
 
 function checkFileExists(url) {
@@ -303,9 +312,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // Direct background download (MP3/MP4) without switching tabs
     if (request.action === 'direct_download') {
-        sendViaWebSocket(request).then((wsSuccess) => {
-            if (wsSuccess) {
-                sendResponse({ success: true, method: 'websocket' });
+        sendViaWebSocket(request).then((res) => {
+            if (res && res.success) {
+                sendResponse({ success: true, method: 'websocket', downloadId: res.downloadId });
             } else {
                 sendResponse({ success: false, reason: 'app_not_running' });
             }
@@ -362,20 +371,65 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     delete tabMediaUrls[tabId];
 });
 
-// Periodic ping to app server so the desktop app knows the extension is installed and alive
-function pingServer() {
+// Persistent WebSocket connection to app server for real-time progress broadcast
+let persistentWs = null;
+let reconnectTimer = null;
+
+function broadcastWsEvent(data) {
     try {
-        const ws = new WebSocket('ws://localhost:9595/ws');
-        ws.onopen = () => {
-            ws.send(JSON.stringify({ type: 'extension_ping' }));
-            setTimeout(() => {
-                try { ws.close(); } catch (e) { }
-            }, 1000);
-        };
-        ws.onerror = () => { };
+        chrome.tabs.query({}, (tabs) => {
+            if (!tabs || tabs.length === 0) return;
+            tabs.forEach((tab) => {
+                if (tab && tab.id) {
+                    chrome.tabs.sendMessage(tab.id, {
+                        action: 'download_ws_event',
+                        data: data
+                    }).catch(() => { });
+                }
+            });
+        });
     } catch (e) { }
 }
 
-pingServer();
-setInterval(pingServer, 15000);
+function initPersistentWs() {
+    if (persistentWs && (persistentWs.readyState === WebSocket.OPEN || persistentWs.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+    try {
+        persistentWs = new WebSocket('ws://localhost:9595/ws');
+        persistentWs.onopen = () => {
+            try {
+                persistentWs.send(JSON.stringify({ type: 'extension_ping' }));
+            } catch (e) { }
+        };
+        persistentWs.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                broadcastWsEvent(data);
+            } catch (e) { }
+        };
+        persistentWs.onclose = () => {
+            persistentWs = null;
+            if (!reconnectTimer) {
+                reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    initPersistentWs();
+                }, 3000);
+            }
+        };
+        persistentWs.onerror = () => {
+            try { persistentWs.close(); } catch (e) { }
+        };
+    } catch (e) {
+        if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                initPersistentWs();
+            }, 3000);
+        }
+    }
+}
+
+initPersistentWs();
+setInterval(initPersistentWs, 15000);
 
