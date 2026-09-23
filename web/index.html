@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ssshmul Downloader</title>
+    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="stylesheet" href="popup.css">
+    <style>
+        body {
+            width: 100% !important;
+            max-width: 440px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background-color: var(--yt-spec-base-background, #212121);
+            color: var(--yt-spec-text-primary, #ffffff);
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .popup-container {
+            width: 100%;
+            flex: 1;
+        }
+    </style>
+    <script>
+        // Polyfill chrome.* APIs for standalone desktop app window
+        if (typeof window.chrome === 'undefined' || !window.chrome.storage) {
+            window.chrome = window.chrome || {};
+            window.chrome.storage = {
+                local: {
+                    get: function(keys, callback) {
+                        return new Promise((resolve) => {
+                            let result = {};
+                            if (Array.isArray(keys)) {
+                                keys.forEach(k => {
+                                    let val = localStorage.getItem(k);
+                                    try { result[k] = JSON.parse(val); } catch(e) { result[k] = val; }
+                                });
+                            } else if (typeof keys === 'object' && keys !== null) {
+                                for (let k in keys) {
+                                    let val = localStorage.getItem(k);
+                                    if (val !== null) {
+                                        try { result[k] = JSON.parse(val); } catch(e) { result[k] = val; }
+                                    } else {
+                                        result[k] = keys[k];
+                                    }
+                                }
+                            } else if (typeof keys === 'string') {
+                                let val = localStorage.getItem(keys);
+                                try { result[keys] = JSON.parse(val); } catch(e) { result[keys] = val; }
+                            }
+                            if (callback) callback(result);
+                            resolve(result);
+                        });
+                    },
+                    set: function(items, callback) {
+                        return new Promise((resolve) => {
+                            for (let k in items) {
+                                localStorage.setItem(k, typeof items[k] === 'object' ? JSON.stringify(items[k]) : items[k]);
+                            }
+                            if (callback) callback();
+                            resolve();
+                        });
+                    }
+                }
+            };
+            window.chrome.runtime = window.chrome.runtime || {
+                sendNativeMessage: function(host, msg, cb) {
+                    if (cb) cb({ success: true });
+                },
+                sendMessage: function(msg, cb) {
+                    if (cb) cb();
+                },
+                lastError: null
+            };
+            window.chrome.tabs = window.chrome.tabs || {
+                query: function(q, cb) {
+                    if (cb) cb([]);
+                    return Promise.resolve([]);
+                }
+            };
+        }
+    </script>
+</head>
+<body>
+    <div class="popup-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="brand">
+                <img src="icon.png" alt="Logo" class="logo">
+                <div class="brand-info">
+                    <div class="brand-title-row">
+                        <h1 class="title">Ssshmul Downloader</h1>
+                    </div>
+                    <div id="server-status" class="status-pill offline" title="לחץ להפעלת השרת">
+                        <span id="status-text" class="status-text">שרת מנותק (לחץ להפעלה)</span>
+                        <span class="status-dot"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="settings-btn" class="yt-header-icon-btn" title="הגדרות">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Offline Alert Banner (Only in Main View) -->
+        <div id="server-offline-banner" class="offline-banner">
+            <div class="offline-banner-content">
+                <span class="offline-icon">⚡</span>
+                <div class="offline-text-wrap">
+                    <span class="offline-title">השרת כרגע כבוי</span>
+                    <span class="offline-desc">לחץ להפעלה מהירה ברקע</span>
+                </div>
+            </div>
+            <button id="start-server-btn" class="start-server-btn">הפעל תוכנה 🚀</button>
+        </div>
+
+        <!-- Extension Setup Banner -->
+        <div id="extension-promo-banner" class="extension-banner hidden">
+            <div class="ext-banner-content">
+                <div class="ext-banner-icon">🧩</div>
+                <div class="ext-banner-text">
+                    <span class="ext-banner-title">תוסף הדפדפן לא מותקן</span>
+                    <span class="ext-banner-desc">התקן את התוסף להורדת שירים בקליק ישירות מיוטיוב</span>
+                </div>
+            </div>
+            <div class="ext-banner-actions">
+                <button id="open-ext-guide-btn" class="ext-action-btn primary">התקן עכשיו ✨</button>
+                <button id="dismiss-ext-banner-btn" class="ext-action-btn secondary" title="סגור">✕</button>
+            </div>
+        </div>
+
+        <!-- Main View -->
+        <div id="main-view" class="view-container">
+            <div class="main-card">
+                <!-- Mode Selector (Link vs Artist Search) -->
+                <div class="mode-tabs">
+                    <button id="mode-link" class="mode-tab active">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                        </svg>
+                        <span>הורדה מקישור</span>
+                    </button>
+                    <button id="mode-search" class="mode-tab">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <span>חיפוש שירים</span>
+                    </button>
+                    <button id="mode-tracking" class="mode-tab">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="22"></line>
+                        </svg>
+                        <span>מעקב אמנים</span>
+                    </button>
+                </div>
+
+                <!-- 1. Format Selector Tabs (YouTube Pill Style) -->
+                <div class="format-tabs">
+                    <button id="tab-mp3" class="yt-pill-tab" data-type="mp3">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg>
+                        <span>שמע (MP3)</span>
+                    </button>
+                    <button id="tab-mp4" class="yt-pill-tab active" data-type="mp4">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+                        <span>וידאו (MP4)</span>
+                    </button>
+                </div>
+
+                <!-- 2. URL Input Row (Link Mode) -->
+                <div id="link-input-section" class="input-group">
+                    <div class="input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                        </svg>
+                        <input type="text" id="url-input" placeholder="הדבק קישור להורדה ישירה...">
+                        <button id="paste-btn" class="input-btn" title="הדבק מהלוח">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                        <button id="clear-btn" class="input-btn hidden" title="נקה קישור">✕</button>
+                        <button id="add-btn" class="input-btn" title="הורד עכשיו">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2.1 Artist Search Section (Search Mode) -->
+                <div id="artist-search-section" class="artist-search-box hidden">
+                    <!-- Search Count & Options Row -->
+                    <div class="search-options-row">
+                        <span class="search-opt-label">כמות שירים:</span>
+                        <div class="count-selector-group">
+                            <div class="count-chips">
+                                <button class="count-chip" data-count="5">5</button>
+                                <button class="count-chip active" data-count="10">10</button>
+                                <button class="count-chip" data-count="20">20</button>
+                                <button class="count-chip" data-count="30">30</button>
+                                <button class="count-chip" data-count="all">הכל</button>
+                            </div>
+                            <div class="custom-count-wrapper" title="הזן כמות מותאמת אישית">
+                                <span class="custom-count-label">מותאם:</span>
+                                <input type="number" id="custom-count-input" min="1" max="100" placeholder="10" class="custom-count-input">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="input-wrapper search-input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="artist-query-input" placeholder="הקלד שם אמן או שיר...">
+                        <button id="artist-clear-btn" class="input-btn hidden" title="נקה חיפוש">✕</button>
+                        <button id="artist-search-btn" class="search-submit-btn" title="חפש שירים">
+                            <span>חפש</span>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Search Results Area -->
+                    <div id="search-results-section" class="search-results-section hidden">
+                        <div class="results-header">
+                            <div class="results-title-row">
+                                <label class="select-all-label">
+                                    <input type="checkbox" id="select-all-results" checked>
+                                    <span>סמן הכל</span>
+                                </label>
+                                <span id="results-count-badge" class="playlist-count-badge">0</span>
+                            </div>
+                            <button id="add-selected-btn" class="yt-action-pill download-all">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                                <span>הוסף נבחרים לרשימה</span>
+                            </button>
+                        </div>
+                        <div id="search-results-list" class="search-results-list">
+                            <!-- Search result items injected dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.2 Artist Tracking Section (Tracking Mode) -->
+                <div id="artist-tracking-section" class="artist-tracking-box hidden">
+                    <!-- Add Artist Input -->
+                    <div class="input-wrapper search-input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <line x1="19" y1="8" x2="19" y2="14"></line>
+                            <line x1="22" y1="11" x2="16" y2="11"></line>
+                        </svg>
+                        <input type="text" id="track-artist-input" placeholder="הכנס קישור לערוץ, שם אמן או מזהה @...">
+                        <button id="track-artist-btn" class="search-submit-btn" title="הוסף אמן למעקב">
+                            <span>הוסף למעקב</span>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Smart Deduplication Info Banner -->
+                    <div id="dedup-info-badge" class="dedup-info-badge">
+                        <span class="dedup-icon">✨</span>
+                        <div class="dedup-text">
+                            <strong>מנגנון מניעת כפילויות חכם פעיל:</strong>
+                            <span>מוריד את גרסת השיר הרשמית בלבד (Audio / Topic) ומונע הורדת קליפים כפולים!</span>
+                        </div>
+                        <button id="close-dedup-badge-btn" class="dedup-close-btn" title="סגור הודעה" type="button" aria-label="סגור">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Tracking Header & Global Actions -->
+                    <div class="tracking-actions-bar">
+                        <button id="scan-all-artists-btn" class="yt-action-pill scan-all-pill" title="סרוק עכשיו את כל האמנים במעקב">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+                                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+                            </svg>
+                            <span>סרוק הכל עכשיו</span>
+                        </button>
+                        <span id="tracked-artists-count-badge" class="playlist-count-badge">0 אמנים</span>
+                    </div>
+
+                    <!-- Scan Progress Alert -->
+                    <div id="scan-status-alert" class="scan-status-banner hidden">
+                        <span class="spinner-dot"></span>
+                        <span id="scan-status-text">סורק אמנים...</span>
+                    </div>
+
+                    <!-- List of Tracked Artists -->
+                    <div id="tracked-artists-list" class="tracked-artists-list">
+                        <div class="empty-artists-state">
+                            <p>עדיין לא הוגדרו אמנים למעקב.</p>
+                            <span>הזן למעלה קישור או שם אמן כדי לעקוב ולהוריד אוטומטית שירים חדשים!</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Media Preview (If detected) -->
+                <div id="media-preview" class="media-preview hidden">
+                    <div class="media-thumb-wrapper">
+                        <img id="media-thumb" src="" alt="Thumbnail">
+                    </div>
+                    <div class="media-info">
+                        <span id="media-title" class="media-title">טוען פרטים...</span>
+                        <span id="media-domain" class="media-domain">YouTube</span>
+                    </div>
+                </div>
+
+                <!-- 4. Playlist Section -->
+                <div id="playlist-section" class="playlist-section hidden">
+                    <div class="playlist-header">
+                        <div class="playlist-title-row">
+                            <span class="playlist-title">רשימת הורדה</span>
+                            <span id="playlist-count-badge" class="playlist-count-badge">0</span>
+                        </div>
+                        <div class="playlist-actions">
+                            <button id="download-all-btn" class="yt-action-pill download-all">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                                <span>הורד הכל</span>
+                            </button>
+                            <button id="remove-all-btn" class="yt-action-pill remove-all">
+                                <span>הסר הכל</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="playlist-list" class="playlist-list">
+                        <!-- Playlist items injected via JS -->
+                    </div>
+                </div>
+
+                <!-- 5. Selected Quality Quick Indicator -->
+                <div class="quality-indicator-row">
+                    <span class="quality-label">איכות נבחרת:</span>
+                    <button type="button" id="current-quality-badge" class="current-quality-badge" title="לחץ לשינוי איכות ופורמט (נשמר כברירת מחדל)">
+                        <span id="current-quality-badge-text">איכות גבוהה</span>
+                        <svg class="badge-arrow-icon" viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                            <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Active Downloads List -->
+            <div id="downloads-section" class="downloads-section hidden">
+                <div class="section-header">
+                    <div class="playlist-title-row">
+                        <span class="section-title">הורדות פעילות</span>
+                        <span id="active-count-badge" class="count-badge">0</span>
+                    </div>
+                    <div class="playlist-actions">
+                        <button id="toggle-all-pause-btn" class="yt-action-pill" title="השהה את כל ההורדות שבתור">
+                            <span class="toggle-all-icon">⏸</span>
+                            <span class="toggle-all-text">השהה הכל</span>
+                        </button>
+                        <button id="cancel-all-downloads-btn" class="yt-action-pill remove-all" title="בטל את כל ההורדות שבתור">
+                            <span>בטל הכל</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="active-downloads-list" class="downloads-list">
+                    <!-- Live items injected via JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="settings-view" class="settings-view hidden">
+            <div class="settings-header">
+                <div class="settings-title-row">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <h2>הגדרות</h2>
+                </div>
+            </div>
+
+            <!-- Theme Setting -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🎨 ערכת נושא ומראה</h3>
+                <div id="theme-options" class="quality-chips-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <button class="chip active" data-theme-val="dark"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-inline-end:4px"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>כהה</button>
+                    <button class="chip" data-theme-val="light"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-inline-end:4px"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>בהיר</button>
+                    <button class="chip" data-theme-val="system"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-inline-end:4px"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>מערכת</button>
+                </div>
+            </div>
+
+            <!-- Save Location Setting -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">📁 מיקום שמירת קבצים</h3>
+                <div class="download-path-group">
+                    <input type="text" id="save-path-input" class="yt-text-input" placeholder="נתיב תיקיית שמירה (לדוגמה: C:\Downloads)">
+                    <button id="browse-save-path-btn" class="yt-mini-btn" title="בחר תיקייה באמצעות סייר הקבצים">בחר 📁</button>
+                    <button id="reset-path-btn" class="yt-mini-btn" title="שחזר לברירת מחדל של התוכנה">ברירת מחדל</button>
+                </div>
+            </div>
+
+            <!-- Audio Quality Settings -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🎵 איכות ברירת מחדל לשמע (MP3)</h3>
+                <div id="mp3-qualities" class="quality-chips-grid">
+                    <button class="chip active" data-format="mp3_high" data-type="mp3">איכות גבוהה</button>
+                    <button class="chip" data-format="mp3_medium" data-type="mp3">איכות רגילה</button>
+                    <button class="chip" data-format="raw_audio" data-type="mp3">שמע מקורי (Raw)</button>
+                </div>
+            </div>
+
+            <!-- Clean Audio / Studio Version Setting -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🎧 דיוק שמע (גרסת אולפן / Topic)</h3>
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">העדף גרסת שיר נקייה (Studio Audio)</span>
+                        <span class="setting-desc">מאתר ומוריד אוטומטית שיר מקורי ללא קטעי פתיח ודיבור של קליפים</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="clean-audio-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Video Quality Settings -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🎬 איכות ברירת מחדל לוידאו (MP4)</h3>
+                <div id="mp4-qualities" class="quality-chips-grid">
+                    <button class="chip active" data-format="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" data-type="mp4">מיטבית (Best)</button>
+                    <button class="chip" data-format="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]" data-type="mp4">1080p Full HD</button>
+                    <button class="chip" data-format="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]" data-type="mp4">720p HD</button>
+                    <button class="chip" data-format="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]" data-type="mp4">480p SD</button>
+                </div>
+            </div>
+
+            <!-- Subtitles Settings -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">📝 הורדת כתוביות (לשירים ולווידאו)</h3>
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">הורד כתוביות אוטומטית</span>
+                        <span class="setting-desc">הורד קובץ כתוביות אם קיים ביוטיוב</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="subs-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                
+                <div id="subs-sub-options" class="subs-sub-options hidden" style="margin-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 10px;">
+                    <div style="margin-bottom: 10px;">
+                        <span class="setting-desc" style="display: block; margin-bottom: 6px; font-weight: 500;">שפת כתוביות מועדפת:</span>
+                        <div id="subs-lang-chips" class="quality-chips-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                            <button class="chip active" data-lang="he">🇮🇱 עברית</button>
+                            <button class="chip" data-lang="en">🇬🇧 אנגלית</button>
+                            <button class="chip" data-lang="he,en">🌐 עברית + אנגלית</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="setting-desc" style="display: block; margin-bottom: 6px; font-weight: 500;">אופן שמירת הכתוביות:</span>
+                        <div id="subs-type-chips" class="quality-chips-grid" style="grid-template-columns: 1fr 1fr;">
+                            <button class="chip active" data-type-opt="separate">📄 קובץ נפרד (SRT)</button>
+                            <button class="chip" data-type-opt="embed">🎬 מוטמע בקובץ</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tag/Metadata Settings -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🏷️ הגדרות תגיות מטאדאטה</h3>
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">הגדרות תגיות מותאמות</span>
+                        <span class="setting-desc">בחר מאיפה לקחת את הנתונים לכל שדה מטאדאטה בקובץ</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="custom-tags-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div id="tags-sub-options" class="tags-sub-options hidden" style="margin-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 10px;">
+                    <!-- Artist -->
+                    <div class="tag-field-row">
+                        <div class="tag-field-label">
+                            <span class="tag-field-icon">🎤</span>
+                            <span>אמן (Artist)</span>
+                        </div>
+                        <select id="tag-artist-select" class="tag-select">
+                            <option value="auto">אוטומטי (מיוטיוב)</option>
+                            <option value="channel">שם הערוץ</option>
+                            <option value="none">ללא (ריק)</option>
+                        </select>
+                    </div>
+                    <!-- Album -->
+                    <div class="tag-field-row">
+                        <div class="tag-field-label">
+                            <span class="tag-field-icon">💿</span>
+                            <span>אלבום (Album)</span>
+                        </div>
+                        <select id="tag-album-select" class="tag-select">
+                            <option value="auto">אוטומטי (מיוטיוב)</option>
+                            <option value="channel">שם הערוץ</option>
+                            <option value="title">כותרת הסרטון</option>
+                            <option value="none">ללא (ריק)</option>
+                        </select>
+                    </div>
+                    <!-- Year -->
+                    <div class="tag-field-row">
+                        <div class="tag-field-label">
+                            <span class="tag-field-icon">📅</span>
+                            <span>שנה (Year)</span>
+                        </div>
+                        <select id="tag-year-select" class="tag-select">
+                            <option value="auto">אוטומטי (מיוטיוב)</option>
+                            <option value="upload_year">שנת העלאה</option>
+                            <option value="none">ללא (ריק)</option>
+                        </select>
+                    </div>
+                    <!-- Comment -->
+                    <div class="tag-field-row">
+                        <div class="tag-field-label">
+                            <span class="tag-field-icon">💬</span>
+                            <span>הערה (Comment)</span>
+                        </div>
+                        <select id="tag-comment-select" class="tag-select">
+                            <option value="auto">אוטומטי (מיוטיוב)</option>
+                            <option value="description">תיאור הסרטון</option>
+                            <option value="url">כתובת URL</option>
+                            <option value="none">ללא (ריק)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Extension Configuration & Status -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🧩 תוסף דפדפן (Chrome / Edge / Brave)</h3>
+                
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">סטטוס חיבור תוסף הדפדפן</span>
+                        <span id="ext-status-desc" class="setting-desc">בודק סטטוס תוסף...</span>
+                    </div>
+                    <span id="ext-status-badge" class="status-pill offline">
+                        <span id="ext-status-badge-text">לא זוהה</span>
+                        <span class="status-dot"></span>
+                    </span>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button id="settings-install-ext-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px; background: var(--yt-spec-badge-chip-background-hover); border-color: rgba(255,255,255,0.15);">
+                        <span>📖 מדריך התקנה מהיר</span>
+                    </button>
+                    <button id="settings-open-ext-folder-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px;">
+                        <span>📁 פתח תיקיית תוסף</span>
+                    </button>
+                </div>
+
+                <div class="setting-row" style="margin-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 10px;">
+                    <div class="setting-text">
+                        <span class="setting-name">כפתור צף באתרים כלליים</span>
+                        <span class="setting-desc">הצג כפתור הורדה בנגני מדיה חיצוניים</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="generic-btn-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Artist Tracking Settings -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🧑‍🎤 הגדרות מעקב אמנים</h3>
+                
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">📁 תיקיית שמירה ייעודית למעקב אמנים</span>
+                        <span class="setting-desc">השירים יישמרו אוטומטית בתוך תיקיית משנה הנושאת את שם האמן</span>
+                    </div>
+                </div>
+                <div class="download-path-group" style="margin-top: 8px;">
+                    <input type="text" id="artist-tracker-path-input" class="yt-text-input" placeholder="נתיב תיקיית מעקב אמנים (ברירת מחדל: Downloads\SsshmulMusic\מעקב אמנים)">
+                    <button id="browse-artist-tracker-path-btn" class="yt-mini-btn" title="בחר תיקייה באמצעות סייר הקבצים">בחר 📁</button>
+                    <button id="reset-artist-tracker-path-btn" class="yt-mini-btn" title="שחזר לברירת מחדל">ברירת מחדל</button>
+                </div>
+
+                <div class="setting-row" style="margin-top: 14px;">
+                    <div class="setting-text">
+                        <span class="setting-name">תדירות בדיקה אוטומטית ברקע</span>
+                        <span class="setting-desc">בדיקת שירים חדשים שהועלו על ידי האמנים</span>
+                    </div>
+                </div>
+                <div id="artist-scan-interval-chips" class="quality-chips-grid" style="margin-top: 8px; grid-template-columns: 1fr 1fr 1fr;">
+                    <button class="chip" data-interval="3">כל 3 שעות</button>
+                    <button class="chip active" data-interval="6">כל 6 שעות</button>
+                    <button class="chip" data-interval="12">כל 12 שעות</button>
+                    <button class="chip" data-interval="24">כל 24 שעות</button>
+                    <button class="chip" data-interval="0">ידני בלבד</button>
+                </div>
+            </div>
+
+            <!-- Server Control Card -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🖥️ ניהול שרת והפעלה</h3>
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">עצירת שרת ההורדות</span>
+                        <span class="setting-desc">סגירת תהליך השרת שרץ ברקע במחשב</span>
+                    </div>
+                    <button id="stop-server-settings-btn" class="yt-danger-btn" title="עצור את השרת">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+                        <span>עצור שרת</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quality Selector Modal / Dropdown -->
+    <div id="quality-modal-overlay" class="modal-overlay hidden">
+        <div class="quality-modal-content">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg>
+                    <h3>בחירת פורמט ואיכות הורדה</h3>
+                </div>
+                <button id="close-quality-modal-btn" class="modal-close-btn" title="סגור">✕</button>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Modal Format Switcher -->
+                <div class="modal-format-tabs">
+                    <button id="modal-tab-mp3" class="modal-tab active" data-type="mp3">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg>
+                        <span>שמע (MP3)</span>
+                    </button>
+                    <button id="modal-tab-mp4" class="modal-tab" data-type="mp4">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+                        <span>וידאו (MP4)</span>
+                    </button>
+                </div>
+
+                <!-- MP3 Quality Options -->
+                <div id="modal-mp3-options" class="modal-quality-group">
+                    <span class="modal-opt-label">רמת איכות שמע:</span>
+                    <div class="quality-options-list">
+                        <button class="quality-option-btn active" data-type="mp3" data-format="mp3_high">
+                            <div class="opt-main">
+                                <span class="opt-title">איכות גבוהה (320kbps)</span>
+                                <span class="opt-desc">האיכות המקסימלית המומלצת להאזנה</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                        <button class="quality-option-btn" data-type="mp3" data-format="mp3_medium">
+                            <div class="opt-main">
+                                <span class="opt-title">איכות רגילה (192kbps)</span>
+                                <span class="opt-desc">קובץ קל ומהיר להורדה</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                        <button class="quality-option-btn" data-type="mp3" data-format="raw_audio">
+                            <div class="opt-main">
+                                <span class="opt-title">שמע מקורי (Raw Audio)</span>
+                                <span class="opt-desc">ללא המרה נוספת (M4A / Opus)</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- MP4 Quality Options -->
+                <div id="modal-mp4-options" class="modal-quality-group hidden">
+                    <span class="modal-opt-label">רמת איכות וידאו:</span>
+                    <div class="quality-options-list">
+                        <button class="quality-option-btn active" data-type="mp4" data-format="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best">
+                            <div class="opt-main">
+                                <span class="opt-title">מיטבית (Best / 4K / 2K)</span>
+                                <span class="opt-desc">האיכות הגבוהה ביותר שקיימת לסרטון</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                        <button class="quality-option-btn" data-type="mp4" data-format="bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]">
+                            <div class="opt-main">
+                                <span class="opt-title">1080p Full HD</span>
+                                <span class="opt-desc">איכות חדה ומצוינת למסכי מחשב וטלוויזיה</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                        <button class="quality-option-btn" data-type="mp4" data-format="bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]">
+                            <div class="opt-main">
+                                <span class="opt-title">720p HD</span>
+                                <span class="opt-desc">איכות גבוהה במשקל קובץ בינוני</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                        <button class="quality-option-btn" data-type="mp4" data-format="bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]">
+                            <div class="opt-main">
+                                <span class="opt-title">480p SD</span>
+                                <span class="opt-desc">קובץ קל וחסכוני במקום</span>
+                            </div>
+                            <span class="opt-check">✓</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <span class="modal-footer-hint">✨ הבחירה נשמרת אוטומטית כברירת מחדל</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Extension Installation Guide Modal -->
+    <div id="ext-guide-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card ext-guide-card">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-badge-icon">🧩</span>
+                    <h2 class="modal-title">התקנת תוסף הדפדפן</h2>
+                </div>
+                <button id="close-ext-guide-modal-btn" class="modal-close-btn" title="סגור">✕</button>
+            </div>
+
+            <div class="ext-guide-body">
+                <p class="ext-guide-intro">התוסף מוסיף כפתורי הורדה מהירים ישירות מתחת לכל שיר ווידאו ביוטיוב! ההתקנה לוקחת פחות מדקה:</p>
+                
+                <div class="ext-steps-list">
+                    <div class="ext-step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <span class="step-title">פתח את דף התוספים בדפדפן</span>
+                            <span class="step-desc">הדבק בשורת הכתובות בדפדפן: <code id="copy-ext-url-code" style="cursor: pointer; user-select: all;" title="לחץ להעתקה">chrome://extensions</code></span>
+                        </div>
+                        <button id="copy-ext-url-btn" class="yt-mini-btn" style="padding: 4px 8px; font-size: 11px;" title="העתק כתובת">📋 העתק</button>
+                    </div>
+
+                    <div class="ext-step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <span class="step-title">הפעל "מצב מפתח" (Developer mode)</span>
+                            <span class="step-desc">סמן את המתג שנמצא בפינה העליונה של דף התוספים בדפדפן</span>
+                        </div>
+                    </div>
+
+                    <div class="ext-step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <span class="step-title">טען את תיקיית התוסף (extension)</span>
+                            <span class="step-desc">לחץ על <b>"טעינת תוסף לא ארוז" (Load unpacked)</b> ובחר בתיקייה <code>extension</code>, או פשוט <b>גרור את התיקייה <code>extension</code> ישירות לחלון הדפדפן</b></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ext-detected-success-banner" class="ext-success-banner hidden">
+                    <span>🎉 התוסף זוהה בהצלחה ומחובר כעת לתוכנה!</span>
+                </div>
+            </div>
+
+            <div class="ext-guide-footer">
+                <button id="open-ext-folder-action-btn" class="ext-guide-btn primary">
+                    <span>📁 פתח תיקיית תוסף עכשיו</span>
+                </button>
+                <button id="open-browser-extensions-btn" class="ext-guide-btn secondary">
+                    <span>🌐 פתח דף תוספים בדפדפן</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

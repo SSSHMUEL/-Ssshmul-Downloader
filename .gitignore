@@ -1,0 +1,30 @@
+## Build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio
+.vs/
+.vscode/
+
+## Logs and temporary files
+*.log
+app.log
+cookies.txt
+*.tmp
+
+## User Data & Secrets
+settings.json
+artists.json
+downloads/
+SsshmulMusic/
+
+## OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

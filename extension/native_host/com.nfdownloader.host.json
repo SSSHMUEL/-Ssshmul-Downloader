@@ -1,0 +1,9 @@
+{
+  "name": "com.nfdownloader.host",
+  "description": "Ssshmul Downloader Native Messaging Host",
+  "path": "C:\\Users\\SHMUEL\\talkfix\\‪Ssshmul Downloader\\extension\\native_host\\nf_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://pmadpefjbmdcdcjphbbdbljnncecebnp/"
+  ]
+}

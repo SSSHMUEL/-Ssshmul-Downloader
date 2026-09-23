@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Ssshmul Downloader",
+  "version": "1.0.0",
+  "default_locale": "en",
+  "description": "__MSG_extDescription__",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms",
+    "cookies",
+    "webRequest",
+    "downloads",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "youtube.js"
+      ],
+      "all_frames": true
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtElKuEnAB+0JyPeozp+0CsiB9NY41RdzDKxoxMQ3WZ7NW8jj0aKEWznWWZ2PNCyI9/eYiOc/Rb8RMItaCbiVvhKff71yQ/XrvtEdSCHihnNCjmDb+RkFsFLylGe2TT4oXGVxba/OU79/VMLNaxY0611mXBlfaytZrGdZKqIJtp3Jmv+GeFk2S/jrMq+YDHxJ6fGu0UL8jjeAHuXG5VQQVr8hNIrFJn10A3jehtLhZbkmQDcq6bFrVgoA6BXMWiSVCvRJbq0fkx13vJakEtIzgQbk6QS8a4Kl8KQHXzQH9F5cI5pIvOp83ukrjKWWkGtYmyOKWIJWYM7XslvQRJxmdQIDAQAB",
+  "action": {
+    "default_icon": "icon.png",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "48": "icon.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icon_mini.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
