@@ -3075,10 +3075,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Server start triggers
-    startServerBtn.addEventListener('click', startServer);
-    serverStatusPill.addEventListener('click', () => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) startServer();
-    });
+    if (startServerBtn) startServerBtn.addEventListener('click', startServer);
+    if (serverStatusPill) {
+        serverStatusPill.addEventListener('click', () => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) startServer();
+        });
+    }
 
     // Global Click Delegation for Settings Toggle & Action Buttons
     document.addEventListener('click', (e) => {
@@ -3229,10 +3231,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Download All Button
-    downloadAllBtn.addEventListener('click', downloadAllFromPlaylist);
+    if (downloadAllBtn) downloadAllBtn.addEventListener('click', downloadAllFromPlaylist);
 
     // Remove All Button
-    removeAllBtn.addEventListener('click', clearPlaylist);
+    if (removeAllBtn) removeAllBtn.addEventListener('click', clearPlaylist);
 
     // Cancel All Downloads Button
     if (cancelAllDownloadsBtn) {
@@ -3388,13 +3390,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Extension Settings storage
-    genericBtnToggle.addEventListener('change', (e) => {
-        chrome.storage.local.get(['userConfig'], (res) => {
-            let uConf = res.userConfig || {};
-            uConf.enableGenericFloatingBtn = e.target.checked;
-            chrome.storage.local.set({ userConfig: uConf });
+    if (genericBtnToggle) {
+        genericBtnToggle.addEventListener('change', (e) => {
+            chrome.storage.local.get(['userConfig'], (res) => {
+                let uConf = res.userConfig || {};
+                uConf.enableGenericFloatingBtn = e.target.checked;
+                chrome.storage.local.set({ userConfig: uConf });
+            });
         });
-    });
+    }
 
     // ==========================================
     // Artist Tracking (מעקב אחרי אמנים) UI Logic
