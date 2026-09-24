@@ -30,7 +30,10 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Setup Inno Setup
-        uses: Irish-Dev/setup-inno-setup@v1
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
 
       - name: Determine Version
         id: get_version
