@@ -385,18 +385,24 @@
                 </div>
             </div>
 
-            <!-- Extension Configuration -->
+            <!-- YouTube Cookies Management Card -->
             <div class="settings-card">
-                <h3 class="settings-group-title">⚙️ התאמת התוסף</h3>
+                <h3 class="settings-group-title">🍪 ניהול עוגיות ואימות יוטיוב (Cookies)</h3>
+                
                 <div class="setting-row">
                     <div class="setting-text">
-                        <span class="setting-name">כפתור צף באתרים כלליים</span>
-                        <span class="setting-desc">הצג כפתור הורדה בנגני מדיה חיצוניים</span>
+                        <span class="setting-name">סנכרון עוגיות יוטיוב</span>
+                        <span class="setting-desc">משמש למעקף חסימות בוטים, הורדת תכנים מוגבלים ומעקב אמנים חלק</span>
                     </div>
-                    <label class="switch">
-                        <input type="checkbox" id="generic-btn-toggle">
-                        <span class="slider"></span>
-                    </label>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button id="sync-cookies-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px; background: var(--yt-spec-badge-chip-background-hover); border-color: rgba(255,255,255,0.15);" title="שואב עוגיות עדכניות מחשבון היוטיוב המחובר בדפדפן">
+                        <span>🔄 רענן עוגיות מהדפדפן</span>
+                    </button>
+                    <button id="clear-cookies-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px;" title="מוחק עוגיות ישנות/פגומות שנשמרו במחשב">
+                        <span>🗑️ נקה עוגיות שמורות</span>
+                    </button>
                 </div>
             </div>
 

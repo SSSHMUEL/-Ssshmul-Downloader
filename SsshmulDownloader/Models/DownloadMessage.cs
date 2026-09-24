@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using SsshmulDownloader.Engine;
 
 namespace SsshmulDownloader.Models
 {
@@ -159,6 +160,19 @@ namespace SsshmulDownloader.Models
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? TotalNewSongs { get; set; }
 
+        // App update fields
+        [JsonPropertyName("updateInfo")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SsshmulDownloader.Engine.UpdateInfo? UpdateInfo { get; set; }
+
+        [JsonPropertyName("updateProgress")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? UpdateProgress { get; set; }
+
+        [JsonPropertyName("currentVersion")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CurrentVersion { get; set; }
+
         public DownloadMessage() { }
 
         public DownloadMessage(string type)
@@ -166,8 +180,8 @@ namespace SsshmulDownloader.Models
             Type = type;
         }
 
-        public static DownloadMessage Starting(string? downloadId = null) =>
-            new DownloadMessage("starting") { DownloadId = downloadId };
+        public static DownloadMessage Starting(string? downloadId = null, string? title = null, string? thumbnail = null) =>
+            new DownloadMessage("starting") { DownloadId = downloadId, Title = title, Thumbnail = thumbnail };
 
         public static DownloadMessage Progress(string percent, string speed, string? downloadId = null) =>
             new DownloadMessage("progress") { Percent = percent, Speed = speed, DownloadId = downloadId };

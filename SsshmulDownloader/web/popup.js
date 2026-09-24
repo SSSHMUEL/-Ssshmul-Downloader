@@ -112,8 +112,11 @@ const stopServerSettingsBtn = document.getElementById('stop-server-settings-btn'
 // Mode Switch Elements
 const modeLinkBtn = document.getElementById('mode-link');
 const modeSearchBtn = document.getElementById('mode-search');
+const modeTrackingBtn = document.getElementById('mode-tracking');
 const linkInputSection = document.getElementById('link-input-section');
 const artistSearchSection = document.getElementById('artist-search-section');
+const artistTrackingInputSection = document.getElementById('artist-tracking-input-section');
+const artistTrackingSection = document.getElementById('artist-tracking-section');
 
 // Search Elements
 const artistQueryInput = document.getElementById('artist-query-input');
@@ -338,31 +341,44 @@ function stopServer() {
 // Get YouTube Cookies
 function getYoutubeCookies() {
     return new Promise((resolve) => {
-        if (typeof chrome === 'undefined' || !chrome.cookies || typeof chrome.cookies.getAll !== 'function') {
-            resolve(null);
-            return;
+        // 1. Direct chrome.cookies.getAll
+        if (typeof chrome !== 'undefined' && chrome.cookies && typeof chrome.cookies.getAll === 'function') {
+            try {
+                chrome.cookies.getAll({}, (allCookies) => {
+                    if (allCookies && allCookies.length > 0) {
+                        const ytCookies = allCookies.filter(c => {
+                            if (!c.domain) return false;
+                            const d = c.domain.toLowerCase();
+                            return d.includes('youtube.com') || d.includes('googlevideo.com') || d.includes('youtu.be') || d === '.google.com' || d === 'google.com';
+                        });
+                        if (ytCookies.length > 0) {
+                            resolve(formatCookiesNetscape(ytCookies));
+                            return;
+                        }
+                    }
+                    fallbackBgCookies(resolve);
+                });
+                return;
+            } catch (e) { }
         }
-        try {
-            chrome.cookies.getAll({}, (allCookies) => {
-                if (!allCookies || allCookies.length === 0) {
-                    resolve(null);
-                    return;
-                }
-                const ytCookies = allCookies.filter(c => 
-                    c.domain && (c.domain.includes('youtube.com') || 
-                    c.domain.includes('google.com') || 
-                    c.domain.includes('youtu.be'))
-                );
-                if (ytCookies.length === 0) {
-                    resolve(null);
-                    return;
-                }
-                resolve(formatCookiesNetscape(ytCookies));
-            });
-        } catch (e) {
-            resolve(null);
-        }
+        fallbackBgCookies(resolve);
     });
+}
+
+function fallbackBgCookies(resolve) {
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        try {
+            chrome.runtime.sendMessage({ action: 'get_cookies' }, (resp) => {
+                if (resp && resp.cookies) {
+                    resolve(resp.cookies);
+                } else {
+                    resolve(null);
+                }
+            });
+            return;
+        } catch (e) { }
+    }
+    resolve(null);
 }
 
 function formatCookiesNetscape(cookies) {
@@ -477,6 +493,11 @@ function handleServerMessage(data) {
         return;
     }
 
+    if (type === 'cookies_updated' || type === 'cookies_cleared') {
+        showToast(data.message || 'פעולת העוגיות בוצעה בהצלחה');
+        return;
+    }
+
     if (type === 'scan_all_started') {
         const banner = document.getElementById('scan-status-alert');
         const text = document.getElementById('scan-status-text');
@@ -510,21 +531,135 @@ function handleServerMessage(data) {
         return;
     }
 
+    if (type === 'app_version') {
+        const verEl = document.getElementById('current-app-version-text');
+        if (verEl && data.currentVersion) verEl.textContent = data.currentVersion;
+        return;
+    }
+
+    if (type === 'update_status') {
+        const updateInfo = data.updateInfo;
+        const currentVer = data.currentVersion || (updateInfo ? updateInfo.currentVersion : '');
+        const verEl = document.getElementById('current-app-version-text');
+        if (verEl && currentVer) verEl.textContent = currentVer;
+
+        const actionContainer = document.getElementById('update-action-container');
+        const statusDesc = document.getElementById('update-status-desc');
+        const checkBtn = document.getElementById('check-updates-btn');
+        if (checkBtn) {
+            checkBtn.disabled = false;
+            checkBtn.innerHTML = '<span>🔍 בדוק עדכונים</span>';
+        }
+
+        if (updateInfo && updateInfo.hasUpdate && updateInfo.downloadUrl) {
+            if (statusDesc) statusDesc.textContent = 'גרסה חדשה זמינה להורדה!';
+            if (actionContainer) actionContainer.classList.remove('hidden');
+            const latestVerEl = document.getElementById('latest-version-text');
+            if (latestVerEl) latestVerEl.textContent = updateInfo.latestVersion;
+            
+            const notesEl = document.getElementById('update-release-notes');
+            if (notesEl && updateInfo.releaseNotes) {
+                notesEl.textContent = updateInfo.releaseNotes;
+            }
+
+            const installBtn = document.getElementById('install-update-btn');
+            if (installBtn) {
+                installBtn.onclick = () => {
+                    installBtn.disabled = true;
+                    installBtn.innerHTML = '<span>⏳ מוריד עדכון...</span>';
+                    const progContainer = document.getElementById('update-progress-bar-container');
+                    if (progContainer) progContainer.classList.remove('hidden');
+                    
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'install_update',
+                            downloadUrl: updateInfo.downloadUrl
+                        }));
+                    }
+                };
+            }
+            showToast(`✨ גרסה ${updateInfo.latestVersion} זמינה לעדכון!`);
+        } else {
+            if (statusDesc) statusDesc.textContent = 'התוכנה מעודכנת לגרסה האחרונה ✔️';
+            if (actionContainer) actionContainer.classList.add('hidden');
+            showToast('התוכנה מעודכנת לגרסה העדכנית ביותר');
+        }
+        return;
+    }
+
+    if (type === 'update_download_progress') {
+        const percent = data.updateProgress || 0;
+        const progFill = document.getElementById('update-progress-fill');
+        const progText = document.getElementById('update-percent-text');
+        if (progFill) progFill.style.width = `${percent}%`;
+        if (progText) progText.textContent = `${percent}%`;
+        return;
+    }
+
+    if (type === 'error') {
+        const pendingCards = document.querySelectorAll('#tracked-artists-list .is-pending-loading');
+        if (pendingCards.length > 0) {
+            pendingCards.forEach(c => c.remove());
+            const container = document.getElementById('tracked-artists-list');
+            if (container && container.querySelectorAll('.tracked-artist-card').length === 0) {
+                renderTrackedArtists([]);
+            }
+        }
+        showToast(data.error || data.message || 'אירעה שגיאה');
+        return;
+    }
+
     if ((type === 'restoreState' || type === 'restore_state') && Array.isArray(serverActiveDownloads)) {
+        const serverIds = new Set();
         serverActiveDownloads.forEach(task => {
             if (task && (task.downloadId || task.id)) {
                 const taskId = task.downloadId || task.id;
+                serverIds.add(taskId);
+                const isPaused = task.isPaused === true || task.currentState === 'paused';
                 activeDownloads[taskId] = {
                     id: taskId,
                     title: task.title || 'מוריד מדיה...',
                     thumbnail: task.thumbnail || 'icon.png',
                     percent: task.lastPercent || '0',
                     speed: task.lastSpeed || '',
-                    isPaused: task.isPaused === true || task.currentState === 'paused'
+                    isPaused: isPaused
                 };
                 renderDownloadItem(activeDownloads[taskId]);
+                const row = document.getElementById(`item-${taskId}`);
+                if (row) {
+                    const statusDesc = row.querySelector('.item-status-desc');
+                    const fill = row.querySelector('.progress-fill');
+                    const percentEl = row.querySelector('.item-percent-badge');
+                    const speedEl = row.querySelector('.item-speed');
+                    const pauseBtn = row.querySelector('.item-pause-btn');
+                    if (percentEl) percentEl.textContent = (task.lastPercent || '0') + '%';
+                    if (fill) {
+                        fill.style.width = (task.lastPercent || '0') + '%';
+                        fill.classList.toggle('paused', isPaused);
+                    }
+                    if (speedEl) speedEl.textContent = task.lastSpeed ? `(${task.lastSpeed})` : '';
+                    if (statusDesc) {
+                        statusDesc.textContent = isPaused ? 'מושהה ⏸' : 'מוריד...';
+                        statusDesc.style.color = isPaused ? '#f59e0b' : '';
+                    }
+                    if (pauseBtn) {
+                        pauseBtn.classList.toggle('is-paused', isPaused);
+                        pauseBtn.title = isPaused ? 'המשך הורדה' : 'השהה הורדה';
+                        pauseBtn.innerHTML = isPaused ? '<span>המשך</span><span>▶</span>' : '<span>השהה</span><span>⏸</span>';
+                    }
+                }
             }
         });
+
+        // Clean up UI items that are no longer active on the server
+        Object.keys(activeDownloads).forEach(id => {
+            if (!serverIds.has(id)) {
+                delete activeDownloads[id];
+                const row = document.getElementById(`item-${id}`);
+                if (row) row.remove();
+            }
+        });
+
         updateDownloadsVisibility();
         saveActiveDownloadsToStorage();
         return;
@@ -946,15 +1081,40 @@ function renderDownloadItem(item) {
     updateToggleAllPauseBtnState();
 }
 
+function updateTrackingDownloadIndicator() {
+    const indicator = document.getElementById('tracking-download-indicator');
+    const textEl = document.getElementById('tracking-download-text');
+    if (!indicator || !textEl) return;
+
+    const count = Object.keys(activeDownloads).length;
+
+    if (currentMode === 'tracking' && count > 0) {
+        indicator.classList.remove('hidden');
+        textEl.textContent = count === 1 ? 'מוריד 1 ברקע...' : `מוריד ${count} ברקע...`;
+    } else {
+        indicator.classList.add('hidden');
+    }
+
+    if (currentModalArtist) {
+        renderArtistModalSongs();
+    }
+}
+
 function updateDownloadsVisibility() {
     const count = Object.keys(activeDownloads).length;
-    activeCountBadge.textContent = count;
-    if (count > 0) {
-        downloadsSection.classList.remove('hidden');
-        updateToggleAllPauseBtnState();
-    } else {
+    if (activeCountBadge) activeCountBadge.textContent = count;
+
+    if (currentMode === 'tracking') {
         downloadsSection.classList.add('hidden');
+    } else {
+        if (count > 0) {
+            downloadsSection.classList.remove('hidden');
+            updateToggleAllPauseBtnState();
+        } else {
+            downloadsSection.classList.add('hidden');
+        }
     }
+    updateTrackingDownloadIndicator();
 }
 
 // Playlist Management Functions
@@ -2613,6 +2773,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateQualityBadge();
     loadPlaylistFromStorage(); // Load saved playlist
     loadActiveDownloadsFromStorage(); // Load saved active downloads
+    initArtistModalEvents();
     
     // Hide media preview initially if no URL
     if (urlInput.value.trim().length === 0) {
@@ -3083,8 +3244,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Mode Switcher (Link vs Artist Search vs Artist Tracking)
-    const modeTrackingBtn = document.getElementById('mode-tracking');
-    const artistTrackingSection = document.getElementById('artist-tracking-section');
     const formatTabsSection = document.querySelector('.format-tabs');
 
     if (modeLinkBtn && modeSearchBtn && modeTrackingBtn) {
@@ -3095,9 +3254,11 @@ document.addEventListener('DOMContentLoaded', () => {
             modeTrackingBtn.classList.remove('active');
             linkInputSection.classList.remove('hidden');
             artistSearchSection.classList.add('hidden');
+            if (artistTrackingInputSection) artistTrackingInputSection.classList.add('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.add('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
             updateQualityBadge();
+            updateDownloadsVisibility();
         });
 
         modeSearchBtn.addEventListener('click', () => {
@@ -3107,9 +3268,11 @@ document.addEventListener('DOMContentLoaded', () => {
             modeTrackingBtn.classList.remove('active');
             linkInputSection.classList.add('hidden');
             artistSearchSection.classList.remove('hidden');
+            if (artistTrackingInputSection) artistTrackingInputSection.classList.add('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.add('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
             updateQualityBadge();
+            updateDownloadsVisibility();
             artistQueryInput.focus();
         });
 
@@ -3120,9 +3283,11 @@ document.addEventListener('DOMContentLoaded', () => {
             modeSearchBtn.classList.remove('active');
             linkInputSection.classList.add('hidden');
             artistSearchSection.classList.add('hidden');
+            if (artistTrackingInputSection) artistTrackingInputSection.classList.remove('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.remove('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
             updateQualityBadge();
+            updateDownloadsVisibility();
 
             // Fetch latest tracked artists from server
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -3255,6 +3420,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (e) { }
 
+            const tempId = Date.now();
+            showPendingArtistCard(query, tempId);
+
             ws.send(JSON.stringify({ 
                 type: 'add_artist', 
                 query: query,
@@ -3262,7 +3430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 formatType: artistTrackerFormatType,
                 cookies: cookies || null
             }));
-            showToast('מוסיף אמן למעקב ובודק שירים...');
+            showToast('מוסיף אמן למעקב ומאתר ערוץ...');
             trackArtistInput.value = '';
         } else {
             showToast('השרת אינו מחובר כעת');
@@ -3302,6 +3470,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Cookie Management Buttons
+    const syncCookiesBtn = document.getElementById('sync-cookies-btn');
+    if (syncCookiesBtn) {
+        syncCookiesBtn.addEventListener('click', async () => {
+            showToast('שואב עוגיות עדכניות מיוטיוב...');
+            let cookies = null;
+            try {
+                cookies = await getYoutubeCookies();
+            } catch (e) { }
+
+            if (!cookies) {
+                showToast('לא נמצאו עוגיות יוטיוב פעילות בדפדפן. ודא שאתה מחובר ליוטיוב בדפדפן.');
+                return;
+            }
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'sync_cookies', cookies: cookies }));
+            } else {
+                showToast('השרת אינו מחובר כעת');
+            }
+        });
+    }
+
+    const clearCookiesBtn = document.getElementById('clear-cookies-btn');
+    if (clearCookiesBtn) {
+        clearCookiesBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'clear_cookies' }));
+            } else {
+                showToast('השרת אינו מחובר כעת');
+            }
+        });
+    }
+
     const closeDedupBtn = document.getElementById('close-dedup-badge-btn');
     if (closeDedupBtn) {
         closeDedupBtn.addEventListener('click', () => {
@@ -3312,13 +3514,16 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDedupBannerVisibility();
 });
 
-let trackedArtistsCache = [];
+let trackedArtistsCache = {};
+let currentModalArtist = null;
+let currentModalTab = 'all';
+let modalSearchFilter = '';
 
 function updateDedupBannerVisibility(artistCount) {
     const banner = document.getElementById('dedup-info-badge');
     if (!banner) return;
     const isDismissed = localStorage.getItem('ssshmul_dedup_banner_dismissed') === 'true';
-    const count = (typeof artistCount === 'number') ? artistCount : (trackedArtistsCache ? trackedArtistsCache.length : 0);
+    const count = (typeof artistCount === 'number') ? artistCount : (trackedArtistsCache ? Object.keys(trackedArtistsCache).length : 0);
     if (isDismissed || count > 0) {
         banner.style.display = 'none';
     } else {
@@ -3334,8 +3539,13 @@ function updateArtistsCountBadge() {
 }
 
 function renderTrackedArtists(artists) {
-    trackedArtistsCache = artists || [];
-    updateDedupBannerVisibility(trackedArtistsCache.length);
+    trackedArtistsCache = {};
+    if (Array.isArray(artists)) {
+        artists.forEach(a => {
+            if (a && a.id) trackedArtistsCache[a.id] = a;
+        });
+    }
+    updateDedupBannerVisibility(Array.isArray(artists) ? artists.length : 0);
     const container = document.getElementById('tracked-artists-list');
     if (!container) return;
 
@@ -3347,6 +3557,7 @@ function renderTrackedArtists(artists) {
             </div>
         `;
         updateArtistsCountBadge();
+        if (currentModalArtist) closeArtistSongsModal();
         return;
     }
 
@@ -3355,14 +3566,62 @@ function renderTrackedArtists(artists) {
         container.appendChild(createArtistCardElement(artist));
     });
     updateArtistsCountBadge();
+
+    if (currentModalArtist && trackedArtistsCache[currentModalArtist.id]) {
+        currentModalArtist = trackedArtistsCache[currentModalArtist.id];
+        renderArtistModalSongs();
+    }
+}
+
+function showPendingArtistCard(query, tempId) {
+    const container = document.getElementById('tracked-artists-list');
+    if (!container) return;
+
+    const empty = container.querySelector('.empty-artists-state');
+    if (empty) empty.remove();
+
+    const card = document.createElement('div');
+    card.id = `artist-pending-${tempId}`;
+    card.className = 'tracked-artist-card is-pending-loading';
+
+    card.innerHTML = `
+        <div class="artist-card-main">
+            <div class="artist-avatar-wrapper">
+                <div class="artist-avatar artist-avatar-skeleton">
+                    <span class="loading-spinner-ring"></span>
+                </div>
+            </div>
+            <div class="artist-info-col">
+                <div class="artist-name-row" title="${escapeHtml(query)}">
+                    <span class="artist-title-text">${escapeHtml(query)}</span>
+                </div>
+                <div class="artist-meta-row">
+                    <span class="pending-status-text">מאתר ערוץ ביוטיוב... ⏳</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    container.prepend(card);
+    updateArtistsCountBadge();
+    const count = container.querySelectorAll('.tracked-artist-card').length;
+    updateDedupBannerVisibility(count);
 }
 
 function upsertTrackedArtist(artist, newCount) {
     const container = document.getElementById('tracked-artists-list');
     if (!container) return;
 
+    if (artist && artist.id) {
+        trackedArtistsCache[artist.id] = artist;
+    }
+
     const empty = container.querySelector('.empty-artists-state');
     if (empty) empty.remove();
+
+    // Remove any pending placeholder cards
+    const pendingCards = container.querySelectorAll('.is-pending-loading');
+    pendingCards.forEach(c => c.remove());
 
     let existingCard = document.getElementById(`artist-card-${artist.id}`);
     const newCard = createArtistCardElement(artist, newCount);
@@ -3375,6 +3634,11 @@ function upsertTrackedArtist(artist, newCount) {
     updateArtistsCountBadge();
     const count = container.querySelectorAll('.tracked-artist-card').length;
     updateDedupBannerVisibility(count);
+
+    if (currentModalArtist && currentModalArtist.id === artist.id) {
+        currentModalArtist = artist;
+        renderArtistModalSongs();
+    }
 }
 
 function createArtistCardElement(artist, newCount = 0) {
@@ -3389,65 +3653,45 @@ function createArtistCardElement(artist, newCount = 0) {
     const lastScanStr = artist.lastScannedAt ? formatRelativeTime(artist.lastScannedAt) : 'טרם נסרק';
 
     card.innerHTML = `
+        <div class="artist-card-backdrop" style="background-image: url('${escapeHtml(avatarUrl)}');"></div>
+        <div class="artist-card-overlay"></div>
         <div class="artist-card-main">
-            <img src="${avatarUrl}" class="artist-avatar" alt="${artist.name}" onerror="this.src='icon.png'">
-            <div class="artist-info-col">
-                <div class="artist-name-row">
-                    <span class="artist-title-text">${escapeHtml(artist.name)}</span>
-                    ${newSongs > 0 ? `<span class="artist-new-badge">+${newSongs} חדשים!</span>` : ''}
-                </div>
-                <div class="artist-meta-row">
-                    <span>${totalSongs} שירים</span>
-                    <span>•</span>
-                    <span>נסרק: ${lastScanStr}</span>
-                </div>
+            <div class="artist-avatar-wrapper">
+                <img src="${avatarUrl}" class="artist-avatar" alt="${escapeHtml(artist.name)}" onerror="this.src='icon.png'">
             </div>
-            <div class="artist-card-actions">
-                <button class="artist-action-btn scan-btn" title="סרוק שירים חדשים לאמן זה">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                </button>
-                <button class="artist-action-btn folder-btn" title="פתח תיקיית שירים">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                </button>
-                <button class="artist-action-btn delete-btn" title="הסר אמן ממעקב">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>
+            <div class="artist-info-col">
+                <div class="artist-name-row" title="${escapeHtml(artist.name)}">
+                    <span class="artist-title-text">${escapeHtml(artist.name)}</span>
+                    ${newSongs > 0 ? `<span class="artist-new-badge">+${newSongs}</span>` : ''}
+                </div>
+                <div class="artist-meta-row" title="נסרק: ${lastScanStr}">
+                    <span class="artist-songs-count">${totalSongs} שירים</span>
+                </div>
+                <div class="artist-card-actions">
+                    <button class="artist-action-btn scan-btn" title="רענן וסרוק שירים חדשים לאמן זה" type="button">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    </button>
+                    <button class="artist-action-btn folder-btn" title="פתח תיקיית שירים" type="button">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    </button>
+                    <button class="artist-action-btn delete-btn" title="הסר אמן ממעקב" type="button">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                </div>
             </div>
         </div>
     `;
 
-    // Render recent songs if available
-    if (Array.isArray(artist.recentSongs) && artist.recentSongs.length > 0) {
-        const songsContainer = document.createElement('div');
-        songsContainer.className = 'artist-songs-container';
+    // Clicking anywhere on the card (except action buttons) opens the interactive modal
+    card.addEventListener('click', () => {
+        openArtistSongsModal(artist);
+    });
 
-        const topSongs = artist.recentSongs.slice(0, 5);
-        topSongs.forEach(song => {
-            const songRow = document.createElement('div');
-            songRow.className = 'artist-song-row';
-            songRow.innerHTML = `
-                <span class="artist-song-title" title="${escapeHtml(song.title)}">${escapeHtml(song.title)}</span>
-                <span class="official-audio-badge">${song.isOfficialAudio ? '🎵 שיר רשמי' : '🎬 וידאו'}</span>
-            `;
-            songsContainer.appendChild(songRow);
-        });
-
-        if (artist.recentSongs.length > 5) {
-            const moreLabel = document.createElement('div');
-            moreLabel.style.fontSize = '10.5px';
-            moreLabel.style.color = 'var(--yt-spec-text-secondary)';
-            moreLabel.style.marginTop = '4px';
-            moreLabel.textContent = `ועוד ${artist.recentSongs.length - 5} שירים נוספים...`;
-            songsContainer.appendChild(moreLabel);
-        }
-
-        card.appendChild(songsContainer);
-    }
-
-    // Bind action buttons
+    // Bind action buttons with stopPropagation
     const scanBtn = card.querySelector('.scan-btn');
     if (scanBtn) {
-        scanBtn.addEventListener('click', () => {
+        scanBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'scan_artist', artistId: artist.id }));
                 showToast(`מתחיל סריקה עבור ${artist.name}...`);
@@ -3457,7 +3701,8 @@ function createArtistCardElement(artist, newCount = 0) {
 
     const folderBtn = card.querySelector('.folder-btn');
     if (folderBtn) {
-        folderBtn.addEventListener('click', () => {
+        folderBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (ws && ws.readyState === WebSocket.OPEN) {
                 if (artist.downloadFolder) {
                     ws.send(JSON.stringify({ type: 'open_folder', path: artist.downloadFolder }));
@@ -3499,6 +3744,397 @@ function formatRelativeTime(timestamp) {
 function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// -------------------------------------------------------------
+// Tracked Artist Songs Modal Logic
+// -------------------------------------------------------------
+const artistSongsModalOverlay = document.getElementById('artist-songs-modal-overlay');
+const closeArtistModalBtn = document.getElementById('close-artist-modal-btn');
+const artistModalBackdrop = document.getElementById('artist-modal-backdrop');
+const artistModalAvatar = document.getElementById('artist-modal-avatar');
+const artistModalTitle = document.getElementById('artist-modal-title');
+const artistModalNewBadge = document.getElementById('artist-modal-new-badge');
+const artistModalStats = document.getElementById('artist-modal-stats');
+const artistModalFormatBadge = document.getElementById('artist-modal-format-badge');
+const artistModalDownloadAllBtn = document.getElementById('artist-modal-download-all-btn');
+const artistModalSearchInput = document.getElementById('artist-modal-search-input');
+const artistModalSearchClear = document.getElementById('artist-modal-search-clear');
+const artistModalSongsList = document.getElementById('artist-modal-songs-list');
+const artistModalOpenFolderBtn = document.getElementById('artist-modal-open-folder-btn');
+const artistModalRescanBtn = document.getElementById('artist-modal-rescan-btn');
+const artistModalFooterCountText = document.getElementById('artist-modal-footer-count-text');
+const artistModalTabs = document.querySelectorAll('.artist-tab-chip');
+
+function initArtistModalEvents() {
+    const closeBtn = document.getElementById('close-artist-modal-btn');
+    const overlay = document.getElementById('artist-songs-modal-overlay');
+    const tabs = document.querySelectorAll('.artist-tab-chip');
+    const searchInp = document.getElementById('artist-modal-search-input');
+    const searchClr = document.getElementById('artist-modal-search-clear');
+    const downloadAllBtn = document.getElementById('artist-modal-download-all-btn');
+    const openFolderBtn = document.getElementById('artist-modal-open-folder-btn');
+    const rescanBtn = document.getElementById('artist-modal-rescan-btn');
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeArtistSongsModal);
+    }
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeArtistSongsModal();
+        });
+    }
+
+    if (tabs && tabs.length > 0) {
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentModalTab = tab.dataset.tab || 'all';
+                renderArtistModalSongs();
+            });
+        });
+    }
+
+    if (searchInp) {
+        searchInp.addEventListener('input', (e) => {
+            modalSearchFilter = (e.target.value || '').trim().toLowerCase();
+            if (searchClr) {
+                if (modalSearchFilter) searchClr.classList.remove('hidden');
+                else searchClr.classList.add('hidden');
+            }
+            renderArtistModalSongs();
+        });
+    }
+
+    if (searchClr) {
+        searchClr.addEventListener('click', () => {
+            if (searchInp) searchInp.value = '';
+            modalSearchFilter = '';
+            searchClr.classList.add('hidden');
+            renderArtistModalSongs();
+        });
+    }
+
+    if (downloadAllBtn) {
+        downloadAllBtn.addEventListener('click', () => {
+            if (!currentModalArtist) return;
+            downloadAllNewArtistSongs(currentModalArtist);
+        });
+    }
+
+    if (openFolderBtn) {
+        openFolderBtn.addEventListener('click', () => {
+            if (!currentModalArtist) return;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                if (currentModalArtist.downloadFolder) {
+                    ws.send(JSON.stringify({ type: 'open_folder', path: currentModalArtist.downloadFolder }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'open_artist_folder', artistName: currentModalArtist.name }));
+                }
+            }
+        });
+    }
+
+    if (rescanBtn) {
+        rescanBtn.addEventListener('click', () => {
+            if (!currentModalArtist) return;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'scan_artist', artistId: currentModalArtist.id }));
+                showToast(`מתחיל סריקה עבור ${currentModalArtist.name}...`);
+            }
+        });
+    }
+
+    const trackingIndicator = document.getElementById('tracking-download-indicator');
+    if (trackingIndicator) {
+        trackingIndicator.addEventListener('click', () => {
+            if (modeLinkBtn) modeLinkBtn.click();
+        });
+    }
+}
+
+function openArtistSongsModal(artist) {
+    if (!artist) return;
+    const overlay = document.getElementById('artist-songs-modal-overlay');
+    const backdrop = document.getElementById('artist-modal-backdrop');
+    const avatar = document.getElementById('artist-modal-avatar');
+    const title = document.getElementById('artist-modal-title');
+    const fmtBadge = document.getElementById('artist-modal-format-badge');
+    const searchInp = document.getElementById('artist-modal-search-input');
+    const searchClr = document.getElementById('artist-modal-search-clear');
+    const tabs = document.querySelectorAll('.artist-tab-chip');
+
+    const currentArtist = (artist && artist.id && trackedArtistsCache[artist.id]) ? trackedArtistsCache[artist.id] : artist;
+    currentModalArtist = currentArtist;
+    currentModalTab = 'all';
+    modalSearchFilter = '';
+
+    if (searchInp) searchInp.value = '';
+    if (searchClr) searchClr.classList.add('hidden');
+    if (tabs && tabs.length > 0) {
+        tabs.forEach(t => {
+            if (t.dataset.tab === 'all') t.classList.add('active');
+            else t.classList.remove('active');
+        });
+    }
+
+    const avatarUrl = currentArtist.avatarUrl || 'icon.png';
+    if (avatar) avatar.src = avatarUrl;
+    if (title) title.textContent = currentArtist.name || 'אמן';
+    if (backdrop) backdrop.style.backgroundImage = `url('${escapeHtml(avatarUrl)}')`;
+
+    const isVideo = currentArtist.preferredFormat?.includes('mp4') || currentArtist.preferredFormat?.includes('video');
+    if (fmtBadge) {
+        fmtBadge.textContent = isVideo ? 'MP4 וידאו' : 'MP3 שמע';
+    }
+
+    renderArtistModalSongs();
+
+    if (overlay) {
+        overlay.classList.remove('hidden');
+    }
+}
+
+function closeArtistSongsModal() {
+    const overlay = document.getElementById('artist-songs-modal-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+    }
+    currentModalArtist = null;
+}
+
+function isSongDownloading(song) {
+    if (!song) return null;
+    return Object.values(activeDownloads).find(d => {
+        if (d.id && song.videoId && d.id.includes(song.videoId)) return true;
+        if (d.url && song.url && d.url === song.url) return true;
+        if (d.url && song.videoId && d.url.includes(song.videoId)) return true;
+        if (d.title && song.title && (d.title === song.title || d.title.includes(song.title) || song.title.includes(d.title))) return true;
+        return false;
+    }) || null;
+}
+
+function renderArtistModalSongs() {
+    if (!currentModalArtist || !artistModalSongsList) return;
+    const artist = trackedArtistsCache[currentModalArtist.id] || currentModalArtist;
+    const songs = Array.isArray(artist.recentSongs) ? artist.recentSongs : [];
+
+    const totalCount = songs.length;
+    let newCount = 0;
+    let downloadingCount = 0;
+    let downloadedCount = 0;
+
+    const enrichedSongs = songs.map(s => {
+        const dlTask = isSongDownloading(s);
+        let status = 'new';
+        if (dlTask) {
+            status = 'downloading';
+            downloadingCount++;
+        } else if (s.isDownloaded) {
+            status = 'downloaded';
+            downloadedCount++;
+        } else {
+            status = 'new';
+            newCount++;
+        }
+        return { song: s, status, dlTask };
+    });
+
+    // Update tab count badges
+    const countAllEl = document.getElementById('artist-tab-count-all');
+    const countNewEl = document.getElementById('artist-tab-count-new');
+    const countDlEl = document.getElementById('artist-tab-count-downloading');
+    const countDoneEl = document.getElementById('artist-tab-count-downloaded');
+
+    if (countAllEl) countAllEl.textContent = totalCount;
+    if (countNewEl) countNewEl.textContent = newCount;
+    if (countDlEl) countDlEl.textContent = downloadingCount;
+    if (countDoneEl) countDoneEl.textContent = downloadedCount;
+
+    if (artistModalStats) {
+        artistModalStats.textContent = `${totalCount} שירים במעקב`;
+    }
+
+    if (artistModalNewBadge) {
+        if (newCount > 0) {
+            artistModalNewBadge.textContent = `${newCount} חדשים`;
+            artistModalNewBadge.classList.remove('hidden');
+        } else {
+            artistModalNewBadge.classList.add('hidden');
+        }
+    }
+
+    if (artistModalDownloadAllBtn) {
+        if (newCount > 0) {
+            artistModalDownloadAllBtn.disabled = false;
+            artistModalDownloadAllBtn.style.opacity = '1';
+            artistModalDownloadAllBtn.style.pointerEvents = 'auto';
+            artistModalDownloadAllBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v13M6 11l6 6 6-6"/>
+                    <path d="M4 19h16"/>
+                </svg>
+                <span>הורד ${newCount} חדשים</span>
+            `;
+        } else {
+            artistModalDownloadAllBtn.disabled = true;
+            artistModalDownloadAllBtn.style.opacity = '0.5';
+            artistModalDownloadAllBtn.style.pointerEvents = 'none';
+            artistModalDownloadAllBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 6L9 17l-5-5"/>
+                </svg>
+                <span>הכל הורד</span>
+            `;
+        }
+    }
+
+    // Filter
+    let filtered = enrichedSongs.filter(item => {
+        if (currentModalTab === 'new' && item.status !== 'new') return false;
+        if (currentModalTab === 'downloading' && item.status !== 'downloading') return false;
+        if (currentModalTab === 'downloaded' && item.status !== 'downloaded') return false;
+
+        if (modalSearchFilter) {
+            const title = (item.song.title || '').toLowerCase();
+            if (!title.includes(modalSearchFilter)) return false;
+        }
+        return true;
+    });
+
+    if (artistModalFooterCountText) {
+        artistModalFooterCountText.textContent = `${filtered.length} מתוך ${totalCount} שירים מוצגים`;
+    }
+
+    artistModalSongsList.innerHTML = '';
+
+    if (filtered.length === 0) {
+        artistModalSongsList.innerHTML = `
+            <div class="artist-empty-modal-songs">
+                <p>לא נמצאו שירים התואמים לסינון הנוכחי.</p>
+            </div>
+        `;
+        return;
+    }
+
+    filtered.forEach(({ song, status, dlTask }) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'artist-song-item';
+
+        const thumbUrl = song.thumbnail || (song.videoId ? `https://i.ytimg.com/vi/${song.videoId}/mqdefault.jpg` : 'icon.png');
+        const durationStr = song.duration || '';
+
+        let statusBadgeHtml = '';
+        let actionBtnHtml = '';
+
+        if (status === 'downloading') {
+            const p = dlTask && dlTask.percent ? `${parseFloat(dlTask.percent).toFixed(0)}%` : '0%';
+            statusBadgeHtml = `<span class="song-status-tag downloading">⏳ מוריד (${p})</span>`;
+            actionBtnHtml = `<button class="song-download-btn is-downloading" disabled>מוריד ${p}...</button>`;
+        } else if (status === 'downloaded') {
+            statusBadgeHtml = `<span class="song-status-tag downloaded">✓ הורד</span>`;
+            actionBtnHtml = `<button class="song-download-btn is-downloaded" title="הורד שוב לקובץ המקומי">⬇ הורד שוב</button>`;
+        } else {
+            statusBadgeHtml = `<span class="song-status-tag new">✨ חדש</span>`;
+            actionBtnHtml = `<button class="song-download-btn" title="הורד שיר עכשיו">⬇ הורד</button>`;
+        }
+
+        itemEl.innerHTML = `
+            <div class="artist-song-thumb-wrap">
+                <img src="${thumbUrl}" class="artist-song-thumb" alt="${escapeHtml(song.title)}" onerror="this.src='icon.png'">
+                ${durationStr ? `<span class="artist-song-duration">${durationStr}</span>` : ''}
+            </div>
+            <div class="artist-song-info">
+                <div class="artist-song-title-row" title="${escapeHtml(song.title)}">
+                    <span class="artist-song-title">${escapeHtml(song.title)}</span>
+                </div>
+                <div class="artist-song-badges">
+                    ${statusBadgeHtml}
+                    ${song.isOfficialAudio ? `<span class="yt-badge audio-badge" title="גרסת אודיו רשמית" style="font-size: 9.5px; padding: 1px 5px;">🎵 רשמי</span>` : ''}
+                </div>
+            </div>
+            <div class="artist-song-actions">
+                ${actionBtnHtml}
+                <a href="${escapeHtml(song.url || (song.videoId ? 'https://www.youtube.com/watch?v=' + song.videoId : '#'))}" target="_blank" class="artist-action-btn" title="פתח ב-YouTube" style="text-decoration: none;">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                </a>
+            </div>
+        `;
+
+        const btn = itemEl.querySelector('.song-download-btn:not([disabled])');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                downloadArtistSong(song, artist);
+            });
+        }
+
+        artistModalSongsList.appendChild(itemEl);
+    });
+}
+
+async function downloadArtistSong(song, artist) {
+    if (!song) return;
+    const songUrl = song.url || (song.videoId ? `https://www.youtube.com/watch?v=${song.videoId}` : null);
+    if (!songUrl) return;
+
+    const isVideo = artist.preferredFormat?.includes('mp4') || artist.preferredFormat?.includes('video') || artist.preferredFormat?.includes('bestvideo');
+    const downloadId = 'artist_' + (song.videoId || Date.now().toString(36)) + '_' + Math.random().toString(36).substr(2, 5);
+    const selectedFormat = artist.preferredFormat || (isVideo ? regularMp4Quality : regularMp3Quality);
+
+    const storage = await new Promise(resolve => chrome.storage.local.get(null, resolve));
+    const cookies = storage.savedCookies || null;
+    const destFolder = artist.downloadFolder || storage.artistTrackerSavePath || null;
+
+    const msg = {
+        type: isVideo ? 'download_video_advanced' : 'download_advanced',
+        downloadId: downloadId,
+        url: songUrl,
+        directUrl: null,
+        customTitle: song.title,
+        customThumbnail: song.thumbnail,
+        customSavePath: destFolder,
+        formatId: selectedFormat,
+        playlist: false,
+        qualityText: isVideo ? 'וידאו (מעקב אמן)' : 'שמע (מעקב אמן)',
+        cookies: cookies,
+        downloadSubs: false,
+        tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
+    };
+
+    activeDownloads[downloadId] = {
+        id: downloadId,
+        title: song.title,
+        thumbnail: song.thumbnail,
+        percent: '0',
+        speed: '',
+        url: songUrl
+    };
+    renderDownloadItem(activeDownloads[downloadId]);
+    saveActiveDownloadsToStorage();
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+        showToast(`מתחיל הורדת: ${song.title}`);
+    } else {
+        showToast('השרת אינו מחובר כעת');
+    }
+
+    renderArtistModalSongs();
+}
+
+async function downloadAllNewArtistSongs(artist) {
+    if (!artist || !Array.isArray(artist.recentSongs)) return;
+    const songsToDownload = artist.recentSongs.filter(s => !s.isDownloaded && !isSongDownloading(s));
+    if (songsToDownload.length === 0) {
+        showToast('אין שירים חדשים להורדה עבור אמן זה');
+        return;
+    }
+
+    showToast(`מתחיל הורדת ${songsToDownload.length} שירים חדשים עבור ${artist.name}...`);
+    for (const song of songsToDownload) {
+        await downloadArtistSong(song, artist);
+    }
 }
 
 // -------------------------------------------------------------
@@ -3660,6 +4296,29 @@ if (settingsOpenExtFolderBtn) {
         }
     });
 }
+
+// Check updates button
+const checkUpdatesBtn = document.getElementById('check-updates-btn');
+if (checkUpdatesBtn) {
+    checkUpdatesBtn.addEventListener('click', () => {
+        checkUpdatesBtn.disabled = true;
+        checkUpdatesBtn.innerHTML = '<span>⏳ בודק...</span>';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'check_for_updates' }));
+        } else {
+            checkUpdatesBtn.disabled = false;
+            checkUpdatesBtn.innerHTML = '<span>🔍 בדוק עדכונים</span>';
+            showToast('השרת אינו מחובר כעת');
+        }
+    });
+}
+
+// Request version and check updates on open
+setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_app_version' }));
+    }
+}, 1500);
 
 // Initial Extension UI check
 setTimeout(() => {

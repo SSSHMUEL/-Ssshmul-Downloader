@@ -249,6 +249,57 @@ namespace SsshmulDownloader.Server
                         }
                         break;
 
+                    case "check_for_updates":
+                        _ = Task.Run(async () =>
+                        {
+                            var info = await UpdateManager.CheckForUpdatesAsync();
+                            var msg = new DownloadMessage("update_status")
+                            {
+                                UpdateInfo = info,
+                                CurrentVersion = UpdateManager.GetCurrentVersion()
+                            };
+                            await BroadcastAsync(msg);
+                        });
+                        break;
+
+                    case "get_app_version":
+                        _ = Task.Run(async () =>
+                        {
+                            var msg = new DownloadMessage("app_version")
+                            {
+                                CurrentVersion = UpdateManager.GetCurrentVersion()
+                            };
+                            await BroadcastAsync(msg);
+                        });
+                        break;
+
+                    case "install_update":
+                        if (root.TryGetProperty("downloadUrl", out var dlUrlProp))
+                        {
+                            string? dlUrl = dlUrlProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(dlUrl))
+                            {
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        await UpdateManager.DownloadAndLaunchInstallerAsync(dlUrl, percent =>
+                                        {
+                                            _ = BroadcastAsync(new DownloadMessage("update_download_progress")
+                                            {
+                                                UpdateProgress = percent
+                                            });
+                                        });
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        await BroadcastAsync(DownloadMessage.CreateError($"שגיאה בהורדת העדכון: {ex.Message}"));
+                                    }
+                                });
+                            }
+                        }
+                        break;
+
                     case "open_folder":
                         if (root.TryGetProperty("path", out var pathProp))
                         {
@@ -436,43 +487,60 @@ namespace SsshmulDownloader.Server
                         {
                             string? query = qProp.GetString();
                             string? artistCookies = root.TryGetProperty("cookies", out var acProp) ? acProp.GetString() : null;
+                            string? preferredFmt = root.TryGetProperty("preferredFormat", out var pfProp) ? pfProp.GetString() : null;
 
                             if (!string.IsNullOrWhiteSpace(query))
                             {
                                 _ = Task.Run(async () =>
                                 {
-                                    await BroadcastAsync(new DownloadMessage("scan_progress")
+                                    string logFile = PathUtils.GetLogFilePath();
+                                    try
                                     {
-                                        Message = $"מאתר ערוץ עבור '{query}'..."
-                                    });
-
-                                    var artist = await ArtistScanner.ResolveArtistInfoAsync(query, artistCookies);
-                                    if (artist != null)
-                                    {
-                                        if (root.TryGetProperty("preferredFormat", out var pfProp))
+                                        await BroadcastAsync(new DownloadMessage("scan_progress")
                                         {
-                                            string? pf = pfProp.GetString();
-                                            if (!string.IsNullOrWhiteSpace(pf))
-                                            {
-                                                artist.PreferredFormat = pf;
-                                            }
-                                        }
-
-                                        ArtistStore.Save(artist);
-                                        await BroadcastAsync(new DownloadMessage("artist_updated")
-                                        {
-                                            Artist = artist,
-                                            Message = $"האמן '{artist.Name}' נוסף בהצלחה למעקב!"
+                                            Message = $"מאתר ערוץ עבור '{query}'..."
                                         });
 
-                                        // Perform initial scan
-                                        await ArtistScanner.ScanArtistAsync(artist, triggerDownload: artist.AutoDownload, artistCookies);
+                                        var artist = await ArtistScanner.ResolveArtistInfoAsync(query, artistCookies);
+                                        if (artist != null)
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(preferredFmt))
+                                            {
+                                                artist.PreferredFormat = preferredFmt;
+                                            }
+
+                                            ArtistStore.Save(artist);
+                                            await BroadcastAsync(new DownloadMessage("artist_updated")
+                                            {
+                                                Artist = artist,
+                                                Message = $"האמן '{artist.Name}' נוסף בהצלחה למעקב!"
+                                            });
+
+                                            // Perform initial scan
+                                            await BroadcastAsync(new DownloadMessage("scan_progress")
+                                            {
+                                                Message = $"סורק שירים עבור '{artist.Name}'..."
+                                            });
+                                            await ArtistScanner.ScanArtistAsync(artist, triggerDownload: artist.AutoDownload, artistCookies);
+                                            await BroadcastAsync(new DownloadMessage("scan_progress")
+                                            {
+                                                Message = $"סריקת '{artist.Name}' הושלמה ({artist.RecentSongs.Count} שירים במעקב)."
+                                            });
+                                        }
+                                        else
+                                        {
+                                            await BroadcastAsync(new DownloadMessage("error")
+                                            {
+                                                Error = $"לא נמצא ערוץ יוטיוב מתאים עבור '{query}'"
+                                            });
+                                        }
                                     }
-                                    else
+                                    catch (Exception ex)
                                     {
+                                        try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] add_artist error: {ex.Message}\n{ex.StackTrace}\n"); } catch { }
                                         await BroadcastAsync(new DownloadMessage("error")
                                         {
-                                            Error = $"לא נמצא ערוץ יוטיוב מתאים עבור '{query}'"
+                                            Error = $"שגיאה בהוספת האמן: {ex.Message}"
                                         });
                                     }
                                 });
@@ -513,13 +581,17 @@ namespace SsshmulDownloader.Server
                             {
                                 var existing = ArtistStore.GetById(aId);
                                 string artistName = existing?.Name ?? aId;
+                                
+                                // Immediately cancel all active downloads belonging to this artist
+                                DownloadManager.Instance.CancelArtistDownloads(aId, existing?.KnownVideoIds);
+
                                 ArtistStore.Delete(aId);
                                 string logFile = PathUtils.GetLogFilePath();
-                                try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Removed artist '{artistName}' (ID: {aId}) from tracking\n"); } catch { }
+                                try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Removed artist '{artistName}' (ID: {aId}) and cancelled active downloads\n"); } catch { }
                                 await BroadcastAsync(new DownloadMessage("artist_deleted")
                                 {
                                     DownloadId = aId,
-                                    Message = $"האמן '{artistName}' הוסר מהמעקב בהצלחה",
+                                    Message = $"האמן '{artistName}' הוסר מהמעקב וההורדות בוטלו",
                                     Artists = ArtistStore.GetAll()
                                 });
                             }
@@ -536,6 +608,30 @@ namespace SsshmulDownloader.Server
                                 ThemeChanged?.Invoke(themeVal);
                             }
                         }
+                        break;
+
+                    case "sync_cookies":
+                        if (root.TryGetProperty("cookies", out var syncCkProp))
+                        {
+                            string? syncCookies = syncCkProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(syncCookies))
+                            {
+                                string cleaned = syncCookies.Trim('\uFEFF', '\u200B', ' ', '\r', '\n');
+                                File.WriteAllText(PathUtils.GetSavedCookiesFilePath(), cleaned, new UTF8Encoding(false));
+                                await BroadcastAsync(new DownloadMessage("cookies_updated")
+                                {
+                                    Message = "עוגיות יוטיוב עודכנו בהצלחה מהדפדפן!"
+                                });
+                            }
+                        }
+                        break;
+
+                    case "clear_cookies":
+                        PathUtils.ClearSavedCookies();
+                        await BroadcastAsync(new DownloadMessage("cookies_cleared")
+                        {
+                            Message = "עוגיות יוטיוב נמחקו בהצלחה!"
+                        });
                         break;
 
                     case "update_artist":

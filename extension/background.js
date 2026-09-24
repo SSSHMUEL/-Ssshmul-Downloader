@@ -262,11 +262,15 @@ function getYoutubeCookies() {
                 resolve(null);
                 return;
             }
-            const ytCookies = allCookies.filter(c => 
-                c.domain.includes('youtube.com') || 
-                c.domain.includes('google.com') || 
-                c.domain.includes('youtu.be')
-            );
+            const ytCookies = allCookies.filter(c => {
+                if (!c.domain) return false;
+                const d = c.domain.toLowerCase();
+                if (d.includes('docs.google') || d.includes('cloud.google') || d.includes('drive.google') || 
+                    d.includes('mail.google') || d.includes('gemini.google') || d.includes('play.google')) {
+                    return false;
+                }
+                return d.includes('youtube.com') || d.includes('googlevideo.com') || d.includes('youtu.be') || d === '.google.com' || d === 'google.com';
+            });
             if (ytCookies.length === 0) {
                 resolve(null);
                 return;

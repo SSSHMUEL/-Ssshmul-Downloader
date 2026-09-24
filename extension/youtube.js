@@ -966,13 +966,14 @@ function tryInjectButton() {
 
     if (!actionBar || document.querySelector('#nf-download-btn') || document.querySelector('#nf-download-buttons')) return;
 
-    // Crisp YouTube native SVG icons
-    const videoIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>`;
-    const audioIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>`;
-    const downloadIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
-    const animArrowIcon = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
-    const checkIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
-    const errorIcon = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+    // Bold Solid YouTube native SVG icons
+    const ytDownloadIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>`;
+    const videoIcon = ytDownloadIcon;
+    const audioIcon = ytDownloadIcon;
+    const downloadIcon = ytDownloadIcon;
+    const animArrowIcon = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>`;
+    const checkIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
+    const errorIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
 
     ensureYtStyles();
 
@@ -981,7 +982,7 @@ function tryInjectButton() {
         mainBtn.id = 'nf-download-btn';
         mainBtn.videoRef = videoEl;
         mainBtn.innerHTML = `${downloadIcon}<span style="white-space: nowrap; font-weight: 500;">${i18n.btnText}</span>`;
-        mainBtn.style.cssText = `background-color: var(--bg-card, #1E293B); color: var(--text, #F1F5F9); border: 1px solid var(--border, #334155); padding: 0 14px; height: 38px; border-radius: 9px; cursor: pointer; font-family: Roboto, Rubik, Arial, sans-serif; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 0; transition: all 0.2s ease; box-sizing: border-box;`;
+        mainBtn.style.cssText = `background-color: var(--bg-card, #1E293B); color: var(--text, #F1F5F9); border: 1px solid var(--border, #334155); padding: 0 16px; height: 36px; border-radius: 18px; cursor: pointer; font-family: Roboto, Rubik, Arial, sans-serif; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 0; transition: all 0.2s ease; box-sizing: border-box;`;
         
         mainBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1008,11 +1009,11 @@ function tryInjectButton() {
         // YouTube native style button container (Only Video & Audio buttons)
         const btnContainer = document.createElement('div');
         btnContainer.id = 'nf-download-buttons';
-        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 6px; margin-inline-end: 6px; height: 36px; vertical-align: middle;`;
+        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 4px; margin-inline-end: 4px; height: 38px; vertical-align: middle; flex-shrink: 0;`;
 
         function createYtNativeButton(defaultIconSvg, defaultText, format) {
             const btn = document.createElement('button');
-            btn.className = `nf-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m`;
+            btn.className = `nf-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading`;
             btn.setAttribute('data-format', format);
             btn.title = `${defaultText} (${format.toUpperCase()})`;
 
@@ -1104,49 +1105,96 @@ function ensureYtStyles() {
             display: inline-flex !important;
             align-items: center !important;
             justify-content: center !important;
-            gap: 6px !important;
-            height: 36px !important;
-            border-radius: 18px !important;
+            gap: 7px !important;
+            height: 38px !important;
+            min-height: 38px !important;
+            max-height: 38px !important;
+            border-radius: 19px !important;
             border: none !important;
-            padding: 0 14px !important;
-            font-family: "Roboto", "YouTube Sans", system-ui, -apple-system, sans-serif !important;
-            font-size: 14px !important;
+            padding: 0 18px !important;
+            font-family: "YouTube Sans", "Roboto", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
+            font-size: 14.5px !important;
             font-weight: 500 !important;
+            line-height: 38px !important;
+            letter-spacing: 0.1px !important;
             cursor: pointer !important;
             box-sizing: border-box !important;
             vertical-align: middle !important;
             white-space: nowrap !important;
             user-select: none !important;
             overflow: hidden !important;
-            transition: background-color 0.2s cubic-bezier(0.05, 0, 0, 1), transform 0.15s ease, color 0.2s !important;
-            margin: 0 !important;
-            line-height: 1 !important;
             outline: none !important;
             text-decoration: none !important;
-        }
-        /* YouTube Light & Dark Modes */
-        html:not([dark]) .nf-yt-btn {
-            background-color: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05)) !important;
-            color: var(--yt-spec-text-primary, #0f0f0f) !important;
-        }
-        html:not([dark]) .nf-yt-btn:hover:not(:disabled) {
-            background-color: var(--yt-spec-button-chip-background-hover, rgba(0, 0, 0, 0.1)) !important;
-        }
-        html:not([dark]) .nf-yt-btn:active:not(:disabled) {
-            background-color: rgba(0, 0, 0, 0.15) !important;
-            transform: scale(0.96) !important;
-        }
-
-        html[dark] .nf-yt-btn, body[dark] .nf-yt-btn, ytd-app[dark] .nf-yt-btn {
+            margin: 0 !important;
+            flex-shrink: 0 !important;
+            backdrop-filter: blur(8px) !important;
+            -webkit-backdrop-filter: blur(8px) !important;
+            transition: background-color 0.2s cubic-bezier(0.05, 0, 0, 1), transform 0.1s ease !important;
+            
+            /* Native YouTube variables & fallback */
             background-color: var(--yt-spec-badge-chip-background, rgba(255, 255, 255, 0.1)) !important;
             color: var(--yt-spec-text-primary, #f1f1f1) !important;
+            fill: currentColor !important;
         }
-        html[dark] .nf-yt-btn:hover:not(:disabled), body[dark] .nf-yt-btn:hover:not(:disabled), ytd-app[dark] .nf-yt-btn:hover:not(:disabled) {
+
+        /* Direction handling for leading icon in RTL/LTR */
+        html[dir="rtl"] .nf-yt-btn, [dir="rtl"] .nf-yt-btn {
+            direction: rtl !important;
+        }
+        html:not([dir="rtl"]) .nf-yt-btn {
+            direction: ltr !important;
+        }
+
+        /* YouTube Light Theme */
+        html:not([dark]) .nf-yt-btn,
+        body:not([dark]) .nf-yt-btn,
+        [light] .nf-yt-btn {
+            background-color: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05)) !important;
+            color: var(--yt-spec-text-primary, #0f0f0f) !important;
+            border: 1px solid rgba(0, 0, 0, 0.04) !important;
+        }
+        html:not([dark]) .nf-yt-btn:hover:not(:disabled),
+        body:not([dark]) .nf-yt-btn:hover:not(:disabled),
+        [light] .nf-yt-btn:hover:not(:disabled) {
+            background-color: var(--yt-spec-button-chip-background-hover, rgba(0, 0, 0, 0.1)) !important;
+        }
+        html:not([dark]) .nf-yt-btn:active:not(:disabled),
+        body:not([dark]) .nf-yt-btn:active:not(:disabled),
+        [light] .nf-yt-btn:active:not(:disabled) {
+            background-color: rgba(0, 0, 0, 0.15) !important;
+            transform: scale(0.97) !important;
+        }
+
+        /* YouTube Dark Theme */
+        html[dark] .nf-yt-btn,
+        body[dark] .nf-yt-btn,
+        ytd-app[dark] .nf-yt-btn,
+        [dark] .nf-yt-btn {
+            background-color: var(--yt-spec-badge-chip-background, rgba(255, 255, 255, 0.1)) !important;
+            color: var(--yt-spec-text-primary, #f1f1f1) !important;
+            border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        }
+        html[dark] .nf-yt-btn:hover:not(:disabled),
+        body[dark] .nf-yt-btn:hover:not(:disabled),
+        ytd-app[dark] .nf-yt-btn:hover:not(:disabled),
+        [dark] .nf-yt-btn:hover:not(:disabled) {
             background-color: var(--yt-spec-button-chip-background-hover, rgba(255, 255, 255, 0.2)) !important;
         }
-        html[dark] .nf-yt-btn:active:not(:disabled), body[dark] .nf-yt-btn:active:not(:disabled), ytd-app[dark] .nf-yt-btn:active:not(:disabled) {
+        html[dark] .nf-yt-btn:active:not(:disabled),
+        body[dark] .nf-yt-btn:active:not(:disabled),
+        ytd-app[dark] .nf-yt-btn:active:not(:disabled),
+        [dark] .nf-yt-btn:active:not(:disabled) {
             background-color: rgba(255, 255, 255, 0.25) !important;
-            transform: scale(0.96) !important;
+            transform: scale(0.97) !important;
+        }
+
+        .nf-yt-btn .nf-btn-icon {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 24px !important;
+            height: 24px !important;
+            flex-shrink: 0 !important;
         }
 
         .nf-yt-btn .nf-progress-fill {

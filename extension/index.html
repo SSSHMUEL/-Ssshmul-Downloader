@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ssshmul Downloader</title>
-    <link rel="icon" type="image/x-icon" href="icon.ico">
+    <link rel="icon" type="image/png" href="icon.png">
     <link rel="stylesheet" href="popup.css">
     <style>
         body {
@@ -88,6 +88,7 @@
         <!-- Header -->
         <header class="header">
             <div class="brand">
+                <img src="icon.png" alt="Logo" class="logo">
                 <div class="brand-info">
                     <div class="brand-title-row">
                         <h1 class="title">Ssshmul Downloader</h1>
@@ -118,6 +119,21 @@
                 </div>
             </div>
             <button id="start-server-btn" class="start-server-btn">הפעל תוכנה 🚀</button>
+        </div>
+
+        <!-- Extension Setup Banner -->
+        <div id="extension-promo-banner" class="extension-banner hidden">
+            <div class="ext-banner-content">
+                <div class="ext-banner-icon">🧩</div>
+                <div class="ext-banner-text">
+                    <span class="ext-banner-title">תוסף הדפדפן לא מותקן</span>
+                    <span class="ext-banner-desc">התקן את התוסף להורדת שירים בקליק ישירות מיוטיוב</span>
+                </div>
+            </div>
+            <div class="ext-banner-actions">
+                <button id="open-ext-guide-btn" class="ext-action-btn primary">התקן עכשיו ✨</button>
+                <button id="dismiss-ext-banner-btn" class="ext-action-btn secondary" title="סגור">✕</button>
+            </div>
         </div>
 
         <!-- Main View -->
@@ -243,9 +259,8 @@
                     </div>
                 </div>
 
-                <!-- 2.2 Artist Tracking Section (Tracking Mode) -->
-                <div id="artist-tracking-section" class="artist-tracking-box hidden">
-                    <!-- Add Artist Input -->
+                <!-- 2.2 Artist Tracking Input (Tracking Mode) -->
+                <div id="artist-tracking-input-section" class="artist-tracking-input-box hidden">
                     <div class="input-wrapper search-input-wrapper">
                         <svg class="input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
@@ -262,49 +277,20 @@
                             </svg>
                         </button>
                     </div>
-
-                    <!-- Smart Deduplication Info Banner -->
-                    <div id="dedup-info-badge" class="dedup-info-badge">
-                        <span class="dedup-icon">✨</span>
-                        <div class="dedup-text">
-                            <strong>מנגנון מניעת כפילויות חכם פעיל:</strong>
-                            <span>מוריד את גרסת השיר הרשמית בלבד (Audio / Topic) ומונע הורדת קליפים כפולים!</span>
-                        </div>
-                        <button id="close-dedup-badge-btn" class="dedup-close-btn" title="סגור הודעה" type="button" aria-label="סגור">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <!-- Tracking Header & Global Actions -->
-                    <div class="tracking-actions-bar">
-                        <button id="scan-all-artists-btn" class="yt-action-pill scan-all-pill" title="סרוק עכשיו את כל האמנים במעקב">
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-                                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-                            </svg>
-                            <span>סרוק הכל עכשיו</span>
-                        </button>
-                        <span id="tracked-artists-count-badge" class="playlist-count-badge">0 אמנים</span>
-                    </div>
-
-                    <!-- Scan Progress Alert -->
-                    <div id="scan-status-alert" class="scan-status-banner hidden">
-                        <span class="spinner-dot"></span>
-                        <span id="scan-status-text">סורק אמנים...</span>
-                    </div>
-
-                    <!-- List of Tracked Artists -->
-                    <div id="tracked-artists-list" class="tracked-artists-list">
-                        <div class="empty-artists-state">
-                            <p>עדיין לא הוגדרו אמנים למעקב.</p>
-                            <span>הזן למעלה קישור או שם אמן כדי לעקוב ולהוריד אוטומטית שירים חדשים!</span>
-                        </div>
-                    </div>
                 </div>
 
-                <!-- 3. Media Preview (If detected) -->
+                <!-- 3. Selected Quality Quick Indicator -->
+                <div class="quality-indicator-row">
+                    <span class="quality-label">איכות נבחרת:</span>
+                    <button type="button" id="current-quality-badge" class="current-quality-badge" title="לחץ לשינוי איכות ופורמט (נשמר כברירת מחדל)">
+                        <span id="current-quality-badge-text">איכות גבוהה</span>
+                        <svg class="badge-arrow-icon" viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                            <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- 4. Media Preview (If detected) -->
                 <div id="media-preview" class="media-preview hidden">
                     <div class="media-thumb-wrapper">
                         <img id="media-thumb" src="" alt="Thumbnail">
@@ -315,7 +301,7 @@
                     </div>
                 </div>
 
-                <!-- 4. Playlist Section -->
+                <!-- 5. Playlist Section -->
                 <div id="playlist-section" class="playlist-section hidden">
                     <div class="playlist-header">
                         <div class="playlist-title-row">
@@ -336,16 +322,62 @@
                         <!-- Playlist items injected via JS -->
                     </div>
                 </div>
+            </div>
 
-                <!-- 5. Selected Quality Quick Indicator -->
-                <div class="quality-indicator-row">
-                    <span class="quality-label">איכות נבחרת:</span>
-                    <button type="button" id="current-quality-badge" class="current-quality-badge" title="לחץ לשינוי איכות ופורמט (נשמר כברירת מחדל)">
-                        <span id="current-quality-badge-text">איכות גבוהה</span>
-                        <svg class="badge-arrow-icon" viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
-                            <path d="M7 10l5 5 5-5z"/>
+            <!-- Tracked Artists Section (Separate Card / Element) -->
+            <div id="artist-tracking-section" class="tracked-artists-section hidden">
+                <!-- Smart Deduplication Info Banner -->
+                <div id="dedup-info-badge" class="dedup-info-badge">
+                    <span class="dedup-icon">✨</span>
+                    <div class="dedup-text">
+                        <strong>מנגנון מניעת כפילויות חכם פעיל:</strong>
+                        <span>מוריד את גרסת השיר הרשמית בלבד (Audio / Topic) ומונע הורדת קליפים כפולים!</span>
+                    </div>
+                    <button id="close-dedup-badge-btn" class="dedup-close-btn" title="סגור הודעה" type="button" aria-label="סגור">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
                         </svg>
                     </button>
+                </div>
+
+                <!-- Tracking Header & Global Actions -->
+                <div class="tracking-actions-bar">
+                    <div class="tracking-actions-left">
+                        <button id="scan-all-artists-btn" class="yt-action-pill scan-all-pill" title="סרוק עכשיו את כל האמנים במעקב">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+                                <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+                            </svg>
+                            <span>סרוק הכל עכשיו</span>
+                        </button>
+                        <div id="tracking-download-indicator" class="tracking-download-indicator hidden" title="הורדות פעילות מתבצעות כעת ברקע - לחץ לצפייה">
+                            <div class="tracking-indicator-icon-wrap">
+                                <span class="indicator-pulse-ring"></span>
+                                <svg class="tracking-indicator-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 3v13M6 11l6 6 6-6"/>
+                                    <path d="M4 19h16"/>
+                                </svg>
+                            </div>
+                            <div class="tracking-indicator-content">
+                                <span id="tracking-download-text" class="tracking-indicator-title">מוריד ברקע...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <span id="tracked-artists-count-badge" class="playlist-count-badge">0 אמנים</span>
+                </div>
+
+                <!-- Scan Progress Alert -->
+                <div id="scan-status-alert" class="scan-status-banner hidden">
+                    <span class="spinner-dot"></span>
+                    <span id="scan-status-text">סורק אמנים...</span>
+                </div>
+
+                <!-- List of Tracked Artists -->
+                <div id="tracked-artists-list" class="tracked-artists-list">
+                    <div class="empty-artists-state">
+                        <p>עדיין לא הוגדרו אמנים למעקב.</p>
+                        <span>הזן למעלה קישור או שם אמן כדי לעקוב ולהוריד אוטומטית שירים חדשים!</span>
+                    </div>
                 </div>
             </div>
 
@@ -542,10 +574,31 @@
                 </div>
             </div>
 
-            <!-- Extension Configuration -->
+            <!-- Extension Configuration & Status -->
             <div class="settings-card">
-                <h3 class="settings-group-title">⚙️ התאמת התוסף</h3>
+                <h3 class="settings-group-title">🧩 תוסף דפדפן (Chrome / Edge / Brave)</h3>
+                
                 <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">סטטוס חיבור תוסף הדפדפן</span>
+                        <span id="ext-status-desc" class="setting-desc">בודק סטטוס תוסף...</span>
+                    </div>
+                    <span id="ext-status-badge" class="status-pill offline">
+                        <span id="ext-status-badge-text">לא זוהה</span>
+                        <span class="status-dot"></span>
+                    </span>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button id="settings-install-ext-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px; background: var(--yt-spec-badge-chip-background-hover); border-color: rgba(255,255,255,0.15);">
+                        <span>📖 מדריך התקנה מהיר</span>
+                    </button>
+                    <button id="settings-open-ext-folder-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px;">
+                        <span>📁 פתח תיקיית תוסף</span>
+                    </button>
+                </div>
+
+                <div class="setting-row" style="margin-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 10px;">
                     <div class="setting-text">
                         <span class="setting-name">כפתור צף באתרים כלליים</span>
                         <span class="setting-desc">הצג כפתור הורדה בנגני מדיה חיצוניים</span>
@@ -554,6 +607,27 @@
                         <input type="checkbox" id="generic-btn-toggle">
                         <span class="slider"></span>
                     </label>
+                </div>
+            </div>
+
+            <!-- YouTube Cookies Management Card -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🍪 ניהול עוגיות ואימות יוטיוב (Cookies)</h3>
+                
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">סנכרון עוגיות יוטיוב</span>
+                        <span class="setting-desc">משמש למעקף חסימות בוטים, הורדת תכנים מוגבלים ומעקב אמנים חלק</span>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button id="sync-cookies-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px; background: var(--yt-spec-badge-chip-background-hover); border-color: rgba(255,255,255,0.15);" title="שואב עוגיות עדכניות מחשבון היוטיוב המחובר בדפדפן">
+                        <span>🔄 רענן עוגיות מהדפדפן</span>
+                    </button>
+                    <button id="clear-cookies-btn" class="yt-mini-btn" style="flex: 1; justify-content: center; padding: 7px 10px;" title="מוחק עוגיות ישנות/פגומות שנשמרו במחשב">
+                        <span>🗑️ נקה עוגיות שמורות</span>
+                    </button>
                 </div>
             </div>
 
@@ -585,6 +659,42 @@
                     <button class="chip" data-interval="12">כל 12 שעות</button>
                     <button class="chip" data-interval="24">כל 24 שעות</button>
                     <button class="chip" data-interval="0">ידני בלבד</button>
+                </div>
+            </div>
+
+            <!-- App Updates Card -->
+            <div class="settings-card">
+                <h3 class="settings-group-title">🔄 עדכוני תוכנה וגרסה</h3>
+                <div class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-name">גרסה נוכחית: <strong id="current-app-version-text">1.0.0</strong></span>
+                        <span id="update-status-desc" class="setting-desc">בדוק אם יש עדכון חדש ב-GitHub</span>
+                    </div>
+                    <button id="check-updates-btn" class="yt-mini-btn" style="padding: 7px 14px;" title="בדוק עדכונים עכשיו">
+                        <span>🔍 בדוק עדכונים</span>
+                    </button>
+                </div>
+
+                <div id="update-action-container" class="hidden" style="margin-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); padding-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div>
+                            <span id="update-badge-text" style="color: #10b981; font-weight: 600;">✨ גרסה חדשה זמינה: <span id="latest-version-text"></span></span>
+                            <div id="update-release-notes" style="font-size: 11px; opacity: 0.8; margin-top: 4px; max-height: 80px; overflow-y: auto;"></div>
+                        </div>
+                        <button id="install-update-btn" class="yt-mini-btn" style="background: #10b981; color: #fff; font-weight: 600; padding: 8px 16px;">
+                            <span>📥 עדכן והתקן עכשיו</span>
+                        </button>
+                    </div>
+                    
+                    <div id="update-progress-bar-container" class="hidden" style="margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                            <span>מוריד עדכון...</span>
+                            <span id="update-percent-text">0%</span>
+                        </div>
+                        <div class="progress-bar-track" style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                            <div id="update-progress-fill" style="width: 0%; height: 100%; background: #10b981; transition: width 0.2s;"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -695,6 +805,153 @@
 
             <div class="modal-footer">
                 <span class="modal-footer-hint">✨ הבחירה נשמרת אוטומטית כברירת מחדל</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Extension Installation Guide Modal -->
+    <div id="ext-guide-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card ext-guide-card">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-badge-icon">🧩</span>
+                    <h2 class="modal-title">התקנת תוסף הדפדפן</h2>
+                </div>
+                <button id="close-ext-guide-modal-btn" class="modal-close-btn" title="סגור">✕</button>
+            </div>
+
+            <div class="ext-guide-body">
+                <p class="ext-guide-intro">התוסף מוסיף כפתורי הורדה מהירים ישירות מתחת לכל שיר ווידאו ביוטיוב! ההתקנה לוקחת פחות מדקה:</p>
+                
+                <div class="ext-steps-list">
+                    <div class="ext-step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <span class="step-title">פתח את דף התוספים בדפדפן</span>
+                            <span class="step-desc">הדבק בשורת הכתובות בדפדפן: <code id="copy-ext-url-code" style="cursor: pointer; user-select: all;" title="לחץ להעתקה">chrome://extensions</code></span>
+                        </div>
+                        <button id="copy-ext-url-btn" class="yt-mini-btn" style="padding: 4px 8px; font-size: 11px;" title="העתק כתובת">📋 העתק</button>
+                    </div>
+
+                    <div class="ext-step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <span class="step-title">הפעל "מצב מפתח" (Developer mode)</span>
+                            <span class="step-desc">סמן את המתג שנמצא בפינה העליונה של דף התוספים בדפדפן</span>
+                        </div>
+                    </div>
+
+                    <div class="ext-step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <span class="step-title">טען את תיקיית התוסף (extension)</span>
+                            <span class="step-desc">לחץ על <b>"טעינת תוסף לא ארוז" (Load unpacked)</b> ובחר בתיקייה <code>extension</code>, או פשוט <b>גרור את התיקייה <code>extension</code> ישירות לחלון הדפדפן</b></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ext-detected-success-banner" class="ext-success-banner hidden">
+                    <span>🎉 התוסף זוהה בהצלחה ומחובר כעת לתוכנה!</span>
+                </div>
+            </div>
+
+            <div class="ext-guide-footer">
+                <button id="open-ext-folder-action-btn" class="ext-guide-btn primary">
+                    <span>📁 פתח תיקיית תוסף עכשיו</span>
+                </button>
+                <button id="open-browser-extensions-btn" class="ext-guide-btn secondary">
+                    <span>🌐 פתח דף תוספים בדפדפן</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Artist Songs Modal Overlay -->
+    <div id="artist-songs-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card artist-songs-modal-card">
+            <!-- Ambient blurred backdrop from artist avatar -->
+            <div id="artist-modal-backdrop" class="artist-modal-backdrop"></div>
+            <div class="artist-modal-overlay-tint"></div>
+
+            <div class="artist-modal-inner">
+                <!-- Modal Header -->
+                <div class="artist-modal-header">
+                    <div class="artist-modal-avatar-wrapper">
+                        <img id="artist-modal-avatar" src="icon.png" class="artist-modal-avatar" alt="Artist Avatar" onerror="this.src='icon.png'">
+                    </div>
+                    <div class="artist-modal-info">
+                        <div class="artist-modal-title-row">
+                            <h2 id="artist-modal-title" class="artist-modal-title">שם האמן</h2>
+                            <span id="artist-modal-new-badge" class="artist-new-badge hidden">0 חדשים</span>
+                        </div>
+                        <div class="artist-modal-subtitle-row">
+                            <span id="artist-modal-stats" class="artist-modal-stats">0 שירים במעקב</span>
+                            <span class="artist-modal-bullet">•</span>
+                            <span id="artist-modal-format-badge" class="artist-modal-format">MP3</span>
+                        </div>
+                    </div>
+                    <div class="artist-modal-header-actions">
+                        <button id="artist-modal-download-all-btn" class="yt-action-pill download-all" title="הורד את כל השירים החדשים של אמן זה">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 3v13M6 11l6 6 6-6"/>
+                                <path d="M4 19h16"/>
+                            </svg>
+                            <span>הורד חדשים</span>
+                        </button>
+                        <button id="close-artist-modal-btn" class="modal-close-btn" title="סגור חלון">✕</button>
+                    </div>
+                </div>
+
+                <!-- Modal Search & Filter Bar -->
+                <div class="artist-modal-controls">
+                    <div class="artist-modal-search-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="artist-modal-search-input" placeholder="חיפוש וסינון שירים...">
+                        <button id="artist-modal-search-clear" class="input-btn hidden" title="נקה">✕</button>
+                    </div>
+
+                    <div class="artist-modal-tabs">
+                        <button class="artist-tab-chip active" data-tab="all">
+                            <span>הכל</span>
+                            <span id="artist-tab-count-all" class="tab-badge">0</span>
+                        </button>
+                        <button class="artist-tab-chip" data-tab="new">
+                            <span>חדשים</span>
+                            <span id="artist-tab-count-new" class="tab-badge">0</span>
+                        </button>
+                        <button class="artist-tab-chip" data-tab="downloading">
+                            <span>בהורדה</span>
+                            <span id="artist-tab-count-downloading" class="tab-badge">0</span>
+                        </button>
+                        <button class="artist-tab-chip" data-tab="downloaded">
+                            <span>הורדו</span>
+                            <span id="artist-tab-count-downloaded" class="tab-badge">0</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Songs List -->
+                <div id="artist-modal-songs-list" class="artist-modal-songs-list">
+                    <!-- Injected via JS -->
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="artist-modal-footer">
+                    <div class="artist-modal-footer-actions">
+                        <button id="artist-modal-open-folder-btn" class="yt-mini-btn" title="פתח תיקיית שמירה של אמן זה">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                            <span>פתח תיקייה</span>
+                        </button>
+                        <button id="artist-modal-rescan-btn" class="yt-mini-btn" title="סרוק שירים חדשים עכשיו">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                            <span>סרוק שוב</span>
+                        </button>
+                    </div>
+                    <span id="artist-modal-footer-count-text" class="artist-modal-footer-text">0 שירים מוצגים</span>
+                </div>
             </div>
         </div>
     </div>

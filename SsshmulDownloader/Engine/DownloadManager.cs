@@ -17,6 +17,7 @@ namespace SsshmulDownloader.Engine
         public static DownloadManager Instance => _instance.Value;
 
         private readonly ConcurrentDictionary<string, DownloadContext> _activeDownloads = new();
+        private readonly SemaphoreSlim _downloadConcurrencySemaphore = new(3, 3);
         public event Action<DownloadMessage>? MessageBroadcast;
 
         public void Broadcast(DownloadMessage message)
@@ -142,12 +143,39 @@ namespace SsshmulDownloader.Engine
                 ctx.Cts.Cancel();
                 ProcessTreeHelper.KillProcessTree(ctx.Process);
 
-                if (!string.IsNullOrEmpty(ctx.TempDir) && Directory.Exists(ctx.TempDir))
+                Broadcast(DownloadMessage.Cancelled(downloadId));
+            }
+        }
+
+        public void CancelArtistDownloads(string artistId, HashSet<string>? songVideoIds = null)
+        {
+            var keys = _activeDownloads.Keys.ToList();
+            foreach (var key in keys)
+            {
+                bool shouldCancel = false;
+                if (key.StartsWith($"artist_{artistId}_", StringComparison.OrdinalIgnoreCase))
                 {
-                    try { Directory.Delete(ctx.TempDir, recursive: true); } catch { }
+                    shouldCancel = true;
+                }
+                else if (key.StartsWith("artist_", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (songVideoIds != null && songVideoIds.Count > 0)
+                    {
+                        foreach (var vidId in songVideoIds)
+                        {
+                            if (key.StartsWith($"artist_{vidId}_", StringComparison.OrdinalIgnoreCase))
+                            {
+                                shouldCancel = true;
+                                break;
+                            }
+                        }
+                    }
                 }
 
-                Broadcast(DownloadMessage.Cancelled(downloadId));
+                if (shouldCancel)
+                {
+                    CancelAdvancedDownload(key);
+                }
             }
         }
 
@@ -220,8 +248,24 @@ namespace SsshmulDownloader.Engine
 
         private async Task RunDownloadTask(DownloadContext ctx)
         {
+            bool semaphoreAcquired = false;
             try
             {
+                if (ctx.IsCancelled)
+                {
+                    Broadcast(DownloadMessage.Cancelled(ctx.DownloadId));
+                    return;
+                }
+
+                await _downloadConcurrencySemaphore.WaitAsync(ctx.Cts.Token);
+                semaphoreAcquired = true;
+
+                if (ctx.IsCancelled)
+                {
+                    Broadcast(DownloadMessage.Cancelled(ctx.DownloadId));
+                    return;
+                }
+
                 var result = await YtDlpProcess.ExecuteDownloadAsync(ctx, Broadcast, ctx.Cts.Token);
                 if (ctx.IsCancelled)
                 {
@@ -232,6 +276,40 @@ namespace SsshmulDownloader.Engine
                     ctx.CurrentState = "completed";
                     Broadcast(DownloadMessage.Success(result.FinalFilePath ?? ctx.DestinationPath ?? "", ctx.DownloadId));
                     _activeDownloads.TryRemove(ctx.DownloadId, out _);
+
+                    // If this download belongs to an artist, mark the song as downloaded in storage & notify UI
+                    if (ctx.DownloadId.StartsWith("artist_"))
+                    {
+                        try
+                        {
+                            var allArtists = ArtistStore.GetAll();
+                            foreach (var a in allArtists)
+                            {
+                                bool updated = false;
+                                foreach (var song in a.RecentSongs)
+                                {
+                                    if (ctx.DownloadId.Contains(song.VideoId) || ctx.Url == song.Url || (song.Title != null && ctx.CustomTitle != null && song.Title.Equals(ctx.CustomTitle, StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        song.IsDownloaded = true;
+                                        song.DownloadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                                        song.FilePath = result.FinalFilePath;
+                                        updated = true;
+                                    }
+                                }
+                                if (updated)
+                                {
+                                    a.NewSongsCount = a.RecentSongs.Count(s => !s.IsDownloaded);
+                                    ArtistStore.Save(a);
+                                    Broadcast(new DownloadMessage("artist_updated")
+                                    {
+                                        Artist = a,
+                                        NewSongsCount = a.NewSongsCount
+                                    });
+                                }
+                            }
+                        }
+                        catch { }
+                    }
                 }
                 else if (ctx.IsPaused)
                 {
@@ -244,12 +322,26 @@ namespace SsshmulDownloader.Engine
                     _activeDownloads.TryRemove(ctx.DownloadId, out _);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                if (ctx.IsCancelled)
+                {
+                    Broadcast(DownloadMessage.Cancelled(ctx.DownloadId));
+                }
+            }
             catch (Exception ex)
             {
                 if (!ctx.IsCancelled && !ctx.IsPaused)
                 {
                     Broadcast(DownloadMessage.CreateError(ex.Message, ctx.DownloadId));
                     _activeDownloads.TryRemove(ctx.DownloadId, out _);
+                }
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                {
+                    _downloadConcurrencySemaphore.Release();
                 }
             }
         }

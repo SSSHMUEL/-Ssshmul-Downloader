@@ -97,6 +97,19 @@ namespace SsshmulDownloader.Storage
             return Path.Combine(GetAppDataDirectory(), "cookies.txt");
         }
 
+        public static void ClearSavedCookies()
+        {
+            try
+            {
+                string path = GetSavedCookiesFilePath();
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch { }
+        }
+
         public static string GetDefaultMusicDirectory()
         {
             string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");

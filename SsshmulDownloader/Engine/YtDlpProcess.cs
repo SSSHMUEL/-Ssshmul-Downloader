@@ -49,17 +49,35 @@ namespace SsshmulDownloader.Engine
                 "--encoding", "utf-8",
                 "--no-check-certificates",
                 "--prefer-insecure",
+                "--force-ipv4",
                 "--progress",
-                "--socket-timeout", "20",
+                "--socket-timeout", "15",
                 "--retries", "3",
                 "--fragment-retries", "3",
-                "--extractor-args", "youtube:player_client=android,ios,web"
+                "--concurrent-fragments", "5",
+                "--convert-thumbnails", "jpg",
+                "--extractor-args", "youtube:player_client=ios,android,web_creator"
             };
 
             if (!string.IsNullOrEmpty(cookiesFile) && File.Exists(cookiesFile))
             {
                 args.Add("--cookies");
                 args.Add(cookiesFile);
+            }
+            else
+            {
+                string savedCookies = PathUtils.GetSavedCookiesFilePath();
+                if (File.Exists(savedCookies))
+                {
+                    args.Add("--cookies");
+                    args.Add(savedCookies);
+                }
+                else
+                {
+                    // Automatic browser extraction fallback
+                    args.Add("--cookies-from-browser");
+                    args.Add("chrome");
+                }
             }
 
             string ffmpegPath = BinaryResolver.FFmpegPath;
@@ -242,6 +260,14 @@ namespace SsshmulDownloader.Engine
                 }
                 catch { }
             }
+            else
+            {
+                string savedCookies = PathUtils.GetSavedCookiesFilePath();
+                if (File.Exists(savedCookies))
+                {
+                    cookiesFile = savedCookies;
+                }
+            }
 
             var args = BuildArguments(
                 ctx.Url,
@@ -288,7 +314,7 @@ namespace SsshmulDownloader.Engine
             string? finalFileName = null;
             bool isNetfreeBlocked = false;
 
-            onMessage(DownloadMessage.Starting(ctx.DownloadId));
+            onMessage(DownloadMessage.Starting(ctx.DownloadId, ctx.Title, ctx.Thumbnail));
 
             try
             {
@@ -542,8 +568,21 @@ namespace SsshmulDownloader.Engine
                     psiChannel.ArgumentList.Add("--dump-single-json");
                     psiChannel.ArgumentList.Add("--no-check-certificates");
                     psiChannel.ArgumentList.Add("--prefer-insecure");
+                    psiChannel.ArgumentList.Add("--force-ipv4");
                     psiChannel.ArgumentList.Add("--socket-timeout");
                     psiChannel.ArgumentList.Add("15");
+                    psiChannel.ArgumentList.Add("--extractor-args");
+                    psiChannel.ArgumentList.Add("youtube:player_client=ios,android,web_creator");
+                    psiChannel.ArgumentList.Add("--user-agent");
+                    psiChannel.ArgumentList.Add("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+
+                    string qjsPath = BinaryResolver.QjsPath;
+                    if (File.Exists(qjsPath))
+                    {
+                        psiChannel.ArgumentList.Add("--js-runtimes");
+                        psiChannel.ArgumentList.Add($"quickjs:{qjsPath}");
+                    }
+
                     psiChannel.ArgumentList.Add("--playlist-items");
                     psiChannel.ArgumentList.Add($"1-{fetchCount}");
                     psiChannel.ArgumentList.Add(targetUrl);
