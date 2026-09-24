@@ -74,7 +74,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            installer_output/SsshmulDownloader_Setup.exe
+            installer_output/Ssshmul-Downloader.exe
             installer_output/SsshmulDownloader_ChromeExtension.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
