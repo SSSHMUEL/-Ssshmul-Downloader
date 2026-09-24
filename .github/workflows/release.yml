@@ -2,14 +2,16 @@ name: Build and Release Ssshmul Downloader
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'Version Tag (e.g. v1.0.0)'
-        required: true
-        default: 'v1.0.0'
+        description: 'Version Tag (e.g. v1.0.1)'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -35,37 +37,57 @@ jobs:
           choco install innosetup -y --no-progress
           echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
 
-      - name: Determine Version
-        id: get_version
+      - name: Determine Version & Check if Release is Needed
+        id: version_check
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $ver = "${{ github.event.inputs.version_tag }}"
+          # 1. Extract Version from SsshmulDownloader.csproj
+          [xml]$csproj = Get-Content SsshmulDownloader/SsshmulDownloader.csproj
+          $xmlVer = $csproj.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($xmlVer)) {
+            $xmlVer = "1.0.0"
           }
-          $cleanVer = $ver.TrimStart('v').TrimStart('V')
-          if ([string]::IsNullOrWhiteSpace($cleanVer)) {
-            $cleanVer = "1.0.0"
+
+          $tagName = "v$xmlVer"
+
+          # If manually triggered with custom version tag
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and -not [string]::IsNullOrWhiteSpace("${{ github.event.inputs.version_tag }}")) {
+            $tagName = "${{ github.event.inputs.version_tag }}"
+            $xmlVer = $tagName.TrimStart('v').TrimStart('V')
           }
-          echo "VERSION=$cleanVer" >> $env:GITHUB_ENV
-          echo "TAG_NAME=$ver" >> $env:GITHUB_ENV
+
+          echo "VERSION=$xmlVer" >> $env:GITHUB_ENV
+          echo "TAG_NAME=$tagName" >> $env:GITHUB_ENV
+
+          # 2. Check if this tag already exists on GitHub
+          $tagExists = $(git tag -l "$tagName")
+          if ($tagExists -and "${{ github.event_name }}" -eq "push" -and "${{ github.ref_type }}" -eq "branch") {
+            echo "Tag $tagName already exists and this is a standard commit push without version bump."
+            echo "SHOULD_RELEASE=false" >> $env:GITHUB_ENV
+          } else {
+            echo "SHOULD_RELEASE=true" >> $env:GITHUB_ENV
+          }
 
       - name: Publish .NET WPF Project (Self-Contained x64)
+        if: env.SHOULD_RELEASE == 'true'
         shell: pwsh
         run: |
           dotnet publish SsshmulDownloader/SsshmulDownloader.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:Version=${{ env.VERSION }}
 
       - name: Compile Inno Setup Installer
+        if: env.SHOULD_RELEASE == 'true'
         shell: pwsh
         run: |
           iscc /DMyAppVersion=${{ env.VERSION }} SsshmulDownloader/installer.iss
 
       - name: Archive Chrome Extension
+        if: env.SHOULD_RELEASE == 'true'
         shell: pwsh
         run: |
           Compress-Archive -Path extension/* -DestinationPath installer_output/SsshmulDownloader_ChromeExtension.zip -Force
 
       - name: Create Release and Upload Assets
+        if: env.SHOULD_RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
