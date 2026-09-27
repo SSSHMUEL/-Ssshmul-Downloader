@@ -1080,6 +1080,22 @@ function tryInjectButton() {
         btnContainer.appendChild(videoBtn);
         btnContainer.appendChild(audioBtn);
 
+        // 3. TalkFix Promo Pill Button
+        const talkfixPill = document.createElement('a');
+        talkfixPill.href = 'https://talkfix.app/';
+        talkfixPill.target = '_blank';
+        talkfixPill.rel = 'noopener noreferrer';
+        talkfixPill.className = 'nf-yt-btn nf-talkfix-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m';
+        talkfixPill.title = 'TalkFix - ללמוד אנגלית בטבעיות מתוך סרטונים ושגרת הגלישה ברשת';
+        talkfixPill.innerHTML = `
+            <span class="nf-btn-content" style="gap: 5px; text-decoration: none; color: inherit; display: inline-flex; align-items: center;">
+                <span style="font-size: 13px; line-height: 1;">✨</span>
+                <span class="nf-btn-text" style="background: linear-gradient(90deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600; letter-spacing: 0.2px;">TalkFix</span>
+            </span>
+        `;
+        talkfixPill.style.cssText = 'text-decoration: none; display: inline-flex; align-items: center; border: 1px solid rgba(129, 140, 248, 0.35); background: rgba(99, 102, 241, 0.12); margin-inline-start: 4px;';
+        btnContainer.appendChild(talkfixPill);
+
         actionBar.prepend(btnContainer);
     }
 }

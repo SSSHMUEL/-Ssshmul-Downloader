@@ -39,10 +39,10 @@ let videoPlaylist = [];
 let searchResults = [];
 let selectedSearchCount = 10;
 let selectedSearchSort = 'latest'; // 'latest' | 'popular'
-let currentAppTheme = 'dark';
+let currentAppTheme = 'system';
 
 function applyTheme(theme, save = false) {
-    currentAppTheme = theme || 'dark';
+    currentAppTheme = theme || 'system';
     if (currentAppTheme === 'system') {
         const isSystemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
         document.documentElement.setAttribute('data-theme', isSystemDark ? 'dark' : 'light');
@@ -76,7 +76,7 @@ if (window.matchMedia) {
 
 // Early initialize theme before DOM load
 try {
-    const cachedTheme = localStorage.getItem('appTheme') || 'dark';
+    const cachedTheme = localStorage.getItem('appTheme') || 'system';
     applyTheme(cachedTheme);
 } catch(e) {}
 
@@ -2829,7 +2829,7 @@ document.addEventListener('DOMContentLoaded', () => {
         artistTrackerMp4Quality = res.artistTrackerMp4Quality || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
 
         // Theme initialization
-        const savedTheme = res.appTheme || res.theme || 'dark';
+        const savedTheme = res.appTheme || res.theme || 'system';
         applyTheme(savedTheme);
 
         // Theme chips binding
@@ -3106,6 +3106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const sView = document.getElementById('settings-view');
             const mView = document.getElementById('main-view');
             const offBanner = document.getElementById('server-offline-banner');
+            const talkfixBanner = document.getElementById('talkfix-ad-container');
 
             if (!sView || !mView) return;
 
@@ -3118,6 +3119,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (offBanner && (!ws || ws.readyState !== WebSocket.OPEN)) {
                     offBanner.classList.remove('hidden');
                 }
+                if (talkfixBanner) talkfixBanner.classList.remove('hidden');
                 updateQualityBadge();
             } else {
                 // Open settings
@@ -3126,6 +3128,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetBtn.classList.add('active');
                 // Hide offline banner in settings view
                 if (offBanner) offBanner.classList.add('hidden');
+                if (talkfixBanner) talkfixBanner.classList.add('hidden');
             }
         }
     });
@@ -4356,5 +4359,31 @@ setTimeout(() => {
 setTimeout(() => {
     updateExtensionUI(isExtensionInstalled);
 }, 1000);
+
+// Helper to open links in external browser
+function openExternalLink(url) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+            ws.send(JSON.stringify({ type: 'open_url', url: url }));
+            return;
+        } catch (e) {}
+    }
+    if (typeof window.chrome !== 'undefined' && window.chrome.tabs && window.chrome.tabs.create) {
+        try {
+            window.chrome.tabs.create({ url: url });
+            return;
+        } catch (e) {}
+    }
+    window.open(url, '_blank');
+}
+
+// TalkFix ad banner click handler
+const talkfixAdCard = document.getElementById('talkfix-ad-card');
+if (talkfixAdCard) {
+    talkfixAdCard.addEventListener('click', (e) => {
+        e.preventDefault();
+        openExternalLink('https://talkfix.app/');
+    });
+}
 
 

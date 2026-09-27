@@ -28,10 +28,10 @@
     --yt-spec-input-background: #f0f2f5;
     --yt-spec-menu-background: #ffffff;
     --yt-spec-outline: rgba(0, 0, 0, 0.1);
-    --yt-spec-badge-chip-background: rgba(0, 0, 0, 0.06);
-    --yt-spec-badge-chip-background-hover: rgba(0, 0, 0, 0.1);
-    --yt-spec-badge-chip-background-active: #383838;
-    --yt-spec-badge-chip-text-active: #ffffff;
+    --yt-spec-badge-chip-background: #f0f2f5;
+    --yt-spec-badge-chip-background-hover: #e4e7eb;
+    --yt-spec-badge-chip-background-active: #dbe0e8;
+    --yt-spec-badge-chip-text-active: #0f141c;
     --yt-spec-text-primary: #282828;
     --yt-spec-text-secondary: #666666;
     --yt-spec-text-disabled: #9aa0a6;
@@ -50,10 +50,10 @@
         --yt-spec-input-background: #f0f2f5;
         --yt-spec-menu-background: #ffffff;
         --yt-spec-outline: rgba(0, 0, 0, 0.1);
-        --yt-spec-badge-chip-background: rgba(0, 0, 0, 0.06);
-        --yt-spec-badge-chip-background-hover: rgba(0, 0, 0, 0.1);
-        --yt-spec-badge-chip-background-active: #383838;
-        --yt-spec-badge-chip-text-active: #ffffff;
+        --yt-spec-badge-chip-background: #f0f2f5;
+        --yt-spec-badge-chip-background-hover: #e4e7eb;
+        --yt-spec-badge-chip-background-active: #dbe0e8;
+        --yt-spec-badge-chip-text-active: #0f141c;
         --yt-spec-text-primary: #282828;
         --yt-spec-text-secondary: #666666;
         --yt-spec-text-disabled: #9aa0a6;
@@ -74,7 +74,7 @@
 }
 
 body {
-    width: 360px;
+    width: 400px;
     background-color: var(--yt-spec-base-background);
     color: var(--yt-spec-text-primary);
     padding: 0;
@@ -675,13 +675,13 @@ body {
     height: 36px;
     padding: 0 12px;
     border-radius: 18px;
-    border: none;
+    border: 1px solid transparent;
     background: var(--yt-spec-badge-chip-background);
     color: var(--yt-spec-text-primary);
     font-size: 12.5px;
     font-weight: 500;
     cursor: pointer;
-    transition: background-color 0.2s, color 0.2s;
+    transition: all 0.2s ease;
 }
 
 .yt-pill-tab:hover {
@@ -691,6 +691,15 @@ body {
 .yt-pill-tab.active {
     background: var(--yt-spec-badge-chip-background-active);
     color: var(--yt-spec-badge-chip-text-active, #0f0f0f);
+    font-weight: 600;
+}
+
+[data-theme="light"] .yt-pill-tab.active,
+:root:not([data-theme="dark"]) .yt-pill-tab.active {
+    background: #383a3d;
+    color: #ffffff;
+    border-color: #2c2e30;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
     font-weight: 600;
 }
 
@@ -1678,7 +1687,7 @@ input:checked + .slider:before {
 /* Toast */
 .toast {
     position: fixed;
-    bottom: 12px;
+    bottom: 108px; /* above the sticky TalkFix banner */
     left: 50%;
     transform: translateX(-50%);
     background: var(--yt-spec-menu-background);
@@ -1689,7 +1698,7 @@ input:checked + .slider:before {
     font-size: 11.5px;
     font-weight: 500;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    z-index: 999;
+    z-index: 9999;
     pointer-events: none;
 }
 
@@ -2571,9 +2580,10 @@ input:checked + .slider:before {
 }
 
 [data-theme="light"] .artist-tab-chip.active {
-    background: #0f0f0f;
-    color: #ffffff !important;
-    border-color: #0f0f0f;
+    background: #dbe0e8;
+    color: #0f141c !important;
+    border-color: #b8c0cc;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .tab-badge {
@@ -2589,7 +2599,8 @@ input:checked + .slider:before {
 }
 
 [data-theme="light"] .artist-tab-chip.active .tab-badge {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(0, 0, 0, 0.08);
+    color: #0f0f0f;
 }
 
 .artist-modal-songs-list {
@@ -2783,6 +2794,184 @@ input:checked + .slider:before {
     color: var(--yt-spec-text-secondary);
     font-size: 12px;
 }
+
+/* ==========================================================================
+   TalkFix Ad / Sponsor Banner (Exact Pastel Gradient)
+   ========================================================================== */
+.talkfix-ad-container {
+    padding: 8px 10px 10px 10px;
+    margin-top: auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+}
+
+/* Hide TalkFix banner when Settings view is active */
+#settings-view:not(.hidden) ~ #talkfix-ad-container,
+.settings-view:not(.hidden) ~ .talkfix-ad-container {
+    display: none !important;
+}
+
+.talkfix-ad-card {
+    display: block;
+    text-decoration: none;
+    position: relative;
+    border-radius: 12px;
+    background: linear-gradient(90deg, #D4D7E3 0%, #CAD5EA 50%, #B4D1F3 100%);
+    border: 1px solid rgba(165, 185, 220, 0.75);
+    box-shadow: 0 4px 14px rgba(100, 130, 180, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.85);
+    overflow: hidden;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+}
+
+.talkfix-ad-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(140, 168, 215, 0.95);
+    background: linear-gradient(90deg, #C8CDE0 0%, #BCCDE8 50%, #A4C7F2 100%);
+    box-shadow: 0 8px 20px rgba(80, 120, 190, 0.32), inset 0 1px 2px rgba(255, 255, 255, 0.95);
+}
+
+.talkfix-ad-glow {
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.4) 0%, transparent 60%);
+    opacity: 0.7;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.talkfix-ad-card:hover .talkfix-ad-glow {
+    opacity: 1;
+}
+
+.talkfix-ad-body {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    position: relative;
+    z-index: 2;
+}
+
+.talkfix-ad-logo-wrap {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.talkfix-ad-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 0;
+    object-fit: contain;
+    background: transparent;
+    box-shadow: none;
+    display: block;
+    transition: transform 0.25s ease;
+}
+
+.talkfix-ad-card:hover .talkfix-ad-logo {
+    transform: scale(1.06) rotate(-2deg);
+}
+
+.talkfix-ad-sparkle {
+    display: none;
+}
+
+.talkfix-ad-text-wrap {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.talkfix-ad-top {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.talkfix-brand-name {
+    display: none;
+}
+
+.talkfix-ad-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.92);
+    color: #1e3a8a;
+    border: 1px solid rgba(255, 255, 255, 0.95);
+    line-height: 1.3;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    display: inline-block;
+    align-self: flex-start;
+}
+
+.talkfix-ad-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.25;
+}
+
+.talkfix-ad-sub {
+    font-size: 9.5px;
+    font-weight: 500;
+    color: #334155;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
+.talkfix-ad-action {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.talkfix-cta-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: linear-gradient(135deg, hsl(25, 90%, 48%) 0%, hsl(20, 88%, 42%) 100%);
+    color: #ffffff;
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 5px 8px;
+    border-radius: 7px;
+    box-shadow: 0 2px 6px rgba(232, 105, 13, 0.35);
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.talkfix-ad-card:hover .talkfix-cta-button {
+    background: linear-gradient(135deg, hsl(25, 90%, 44%) 0%, hsl(20, 88%, 38%) 100%);
+    box-shadow: 0 3px 10px rgba(232, 105, 13, 0.5);
+}
+
+.talkfix-cta-arrow {
+    width: 11px;
+    height: 11px;
+    transition: transform 0.2s ease;
+}
+
+.talkfix-ad-card:hover .talkfix-cta-arrow {
+    transform: translateX(-2px);
+}
+
 
 
 

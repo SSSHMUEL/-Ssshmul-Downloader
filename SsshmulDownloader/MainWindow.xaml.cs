@@ -140,6 +140,22 @@ namespace SsshmulDownloader
                 MainWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
                 MainWebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
 
+                MainWebView.CoreWebView2.NewWindowRequested += (s, args) =>
+                {
+                    args.Handled = true;
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(args.Uri))
+                        {
+                            Process.Start(new ProcessStartInfo(args.Uri) { UseShellExecute = true });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Failed to open external browser window: {ex.Message}");
+                    }
+                };
+
                 MainWebView.NavigationCompleted += (s, args) =>
                 {
                     LoadingText.Visibility = Visibility.Collapsed;

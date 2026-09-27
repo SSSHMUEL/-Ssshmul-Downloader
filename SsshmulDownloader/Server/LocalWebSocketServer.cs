@@ -397,6 +397,24 @@ namespace SsshmulDownloader.Server
                         }
                         break;
 
+                    case "open_url":
+                        if (root.TryGetProperty("url", out var openUrlProp))
+                        {
+                            string? urlToOpen = openUrlProp.GetString();
+                            if (!string.IsNullOrEmpty(urlToOpen) && (urlToOpen.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || urlToOpen.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                try
+                                {
+                                    Process.Start(new ProcessStartInfo(urlToOpen) { UseShellExecute = true });
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"Failed to open external url: {ex.Message}");
+                                }
+                            }
+                        }
+                        break;
+
                     case "cancel_download":
                         // Legacy single cancel
                         break;
