@@ -149,10 +149,66 @@ namespace SsshmulDownloader.ArtistTracker
             return false;
         }
 
-        public static int GetSongScore(ArtistSong song)
+        public static bool IsFromOfficialArtistSource(ArtistSong song, string? artistName, string? artistChannelId)
+        {
+            if (song == null) return false;
+            string uploader = (song.Uploader ?? "").Trim();
+            string chanId = (song.ChannelId ?? "").Trim();
+            string cleanArtist = CleanArtistName(artistName);
+
+            // 1. Matched Channel ID
+            if (!string.IsNullOrEmpty(artistChannelId) && !string.IsNullOrEmpty(chanId) &&
+                string.Equals(artistChannelId, chanId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 2. Official Topic Channel (e.g. "David Kushner - Topic", "Alex Warren - Topic")
+            if (uploader.EndsWith("- Topic", StringComparison.OrdinalIgnoreCase) ||
+                uploader.EndsWith(" - Topic", StringComparison.OrdinalIgnoreCase) ||
+                uploader.EndsWith(" Topic", StringComparison.OrdinalIgnoreCase) ||
+                uploader.EndsWith("- נושא", StringComparison.OrdinalIgnoreCase) ||
+                uploader.EndsWith(" נושא", StringComparison.OrdinalIgnoreCase))
+            {
+                string topicClean = CleanArtistName(uploader);
+                if (string.Equals(topicClean, cleanArtist, StringComparison.OrdinalIgnoreCase) ||
+                    topicClean.Contains(cleanArtist, StringComparison.OrdinalIgnoreCase) ||
+                    cleanArtist.Contains(topicClean, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            // 3. Exact Uploader Name Match (e.g. "David Kushner", "David Kushner Official", "Alex Warren")
+            if (!string.IsNullOrEmpty(uploader))
+            {
+                string uploaderClean = CleanArtistName(uploader);
+                if (string.Equals(uploaderClean, cleanArtist, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            // Reject third-party channels, lyrics channels, fan uploads
+            return false;
+        }
+
+        public static int GetSongScore(ArtistSong song, string? artistName = null, string? artistChannelId = null)
         {
             string t = song.Title.ToLowerInvariant();
             int score = 100;
+
+            // Huge priority bonus for verified official channel / Topic channel
+            bool isOfficialSource = IsFromOfficialArtistSource(song, artistName, artistChannelId);
+            if (isOfficialSource)
+            {
+                score += 50;
+            }
+            else
+            {
+                // Unverified / Third-party uploader (e.g. fan lyric channels)
+                score -= 100;
+            }
 
             // Big penalty for any extra version modifiers in the title (Acoustic, Radio Edit, Cinematic, Live, Remix, etc.)
             if (t.Contains("acoustic") || t.Contains("אקוסטי")) score -= 50;
@@ -184,7 +240,7 @@ namespace SsshmulDownloader.ArtistTracker
             return score;
         }
 
-        public static List<ArtistSong> DeduplicateArtistSongs(List<ArtistSong> rawSongs, string artistName)
+        public static List<ArtistSong> DeduplicateArtistSongs(List<ArtistSong> rawSongs, string artistName, string? artistChannelId = null)
         {
             var bestPerTitle = new Dictionary<string, ArtistSong>(StringComparer.OrdinalIgnoreCase);
 
@@ -198,7 +254,7 @@ namespace SsshmulDownloader.ArtistTracker
                     cleanKey = song.VideoId;
                 }
 
-                int score = GetSongScore(song);
+                int score = GetSongScore(song, artistName, artistChannelId);
                 song.IsOfficialAudio = score >= 80;
 
                 if (!bestPerTitle.TryGetValue(cleanKey, out var existing))
@@ -207,7 +263,7 @@ namespace SsshmulDownloader.ArtistTracker
                 }
                 else
                 {
-                    int existingScore = GetSongScore(existing);
+                    int existingScore = GetSongScore(existing, artistName, artistChannelId);
                     if (score > existingScore)
                     {
                         bestPerTitle[cleanKey] = song;

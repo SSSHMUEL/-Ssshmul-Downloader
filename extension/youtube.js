@@ -603,8 +603,10 @@ function getTargetUrlAndMetadata(isNetube, btn) {
 function executeDownload(format, isNetube, btn, customDownloadId) {
     const data = getTargetUrlAndMetadata(isNetube, btn);
 
-    chrome.storage.local.get(['downloadSubsDefault'], (res) => {
-        if (res.downloadSubsDefault === true || res.downloadSubsDefault === 'true') {
+    chrome.storage.local.get(['downloadSubsDefault', 'subsTypeDefault'], (res) => {
+        const isSubs = res.downloadSubsDefault === true || res.downloadSubsDefault === 'true';
+        const isSeparate = (res.subsTypeDefault || 'separate') === 'separate';
+        if (isSubs && isSeparate) {
             fetchAndDownloadSubtitles(data.title).then(downloaded => {
                 if (downloaded) {
                     showToast(i18n.subsDownloaded);

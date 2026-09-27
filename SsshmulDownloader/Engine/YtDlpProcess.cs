@@ -111,14 +111,15 @@ namespace SsshmulDownloader.Engine
             args.Add(isPlaylist ? "%(playlist)s/%(playlist_index)s - " + outputTemplate : outputTemplate);
             args.Add(isPlaylist ? "--yes-playlist" : "--no-playlist");
 
-            // Subtitle extraction flags - only for video formats!
-            bool isAudio = formatId == "mp3_high" || formatId == "mp3_medium" || formatId == "raw_audio" || formatId == "generic_audio";
-            if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang) && !isAudio)
+            bool isAudio = formatId == null || formatId.StartsWith("mp3") || formatId == "raw_audio" || formatId == "generic_audio";
+
+            // Subtitle extraction flags
+            if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang))
             {
                 string subLang = subs.Lang.Trim();
-                if (subLang == "he,en") subLang = "he.*,iw.*,en.*";
-                else if (subLang == "he") subLang = "he.*,iw.*";
-                else if (subLang == "en") subLang = "en.*";
+                if (subLang == "he,en") subLang = "he.*,iw.*,en.*,he-orig,iw-orig,en-orig";
+                else if (subLang == "he") subLang = "he.*,iw.*,he-orig,iw-orig";
+                else if (subLang == "en") subLang = "en.*,en-orig";
 
                 args.Add("--write-subs");
                 args.Add("--write-auto-subs");
@@ -126,14 +127,9 @@ namespace SsshmulDownloader.Engine
                 args.Add(subLang);
                 args.Add("--convert-subs");
                 args.Add("srt");
-                args.Add("--sub-format");
-                args.Add("srt/vtt/best");
-                args.Add("--ignore-no-formats-error");
                 args.Add("--no-abort-on-error");
-                args.Add("--compat-options");
-                args.Add("no-abort-on-error");
 
-                if (subs.Type == "embed")
+                if (subs.Type == "embed" && !isAudio)
                 {
                     args.Add("--embed-subs");
                 }
@@ -217,8 +213,9 @@ namespace SsshmulDownloader.Engine
                 else if (tagMappings.Comment == "none") { args.Add("--parse-metadata"); args.Add(":%(meta_comment)s"); }
             }
 
-            args.Add("--postprocessor-args"); args.Add("VideoConvertor:-preset ultrafast");
-            args.Add("--postprocessor-args"); args.Add("VideoRemuxer:-preset ultrafast");
+            args.Add("--postprocessor-args"); args.Add("ExtractAudio:-threads 0");
+            args.Add("--postprocessor-args"); args.Add("VideoConvertor:-preset ultrafast -threads 0");
+            args.Add("--postprocessor-args"); args.Add("VideoRemuxer:-preset ultrafast -threads 0");
 
             // Target URL
             args.Add(!string.IsNullOrWhiteSpace(directUrl) ? directUrl : url);
@@ -389,7 +386,7 @@ namespace SsshmulDownloader.Engine
                             onMessage(DownloadMessage.NetfreeBlocked(ctx.DownloadId));
                         }
 
-                        if (line.Contains("ERROR:") || line.Contains("WARNING:"))
+                        if (!string.IsNullOrWhiteSpace(line))
                         {
                             errorOutput.AppendLine(line);
                         }
@@ -417,7 +414,27 @@ namespace SsshmulDownloader.Engine
                         targetFolder = Path.Combine(targetFolder, "Playlist - " + safePlaylist);
                     }
 
-                    string finalPath = MoveFilesSafely(tempDir, targetFolder);
+                    bool isVideo = ctx.IsVideo || (ctx.FormatId != null && !ctx.FormatId.StartsWith("mp3") && ctx.FormatId != "raw_audio" && ctx.FormatId != "generic_audio");
+                    bool isEmbedSubs = ctx.Subs != null && ctx.Subs.Type == "embed";
+
+                    if (!isVideo && isEmbedSubs)
+                    {
+                        try
+                        {
+                            var mp3Files = Directory.GetFiles(tempDir, "*.mp3");
+                            var srtFiles = Directory.GetFiles(tempDir, "*.srt").Concat(Directory.GetFiles(tempDir, "*.vtt")).ToList();
+                            if (mp3Files.Length > 0 && srtFiles.Count > 0)
+                            {
+                                foreach (var mp3 in mp3Files)
+                                {
+                                    await EmbedLyricsIntoMp3Async(mp3, srtFiles[0], ct);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    string finalPath = MoveFilesSafely(tempDir, targetFolder, isEmbedSubs);
                     try
                     {
                         string logFile = PathUtils.GetLogFilePath();
@@ -430,15 +447,25 @@ namespace SsshmulDownloader.Engine
                 {
                     string fullErr = errorOutput.ToString().Trim();
                     string err = fullErr;
-                    
+
                     if (isNetfreeBlocked)
                     {
                         err = "נחסם על ידי נטפרי (HTTP 418)";
                     }
+                    else if (fullErr.Contains("Could not copy Chrome cookie database", StringComparison.OrdinalIgnoreCase) ||
+                             (fullErr.Contains("PermissionError", StringComparison.OrdinalIgnoreCase) && fullErr.Contains("Cookies", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        err = "שגיאת עוגיות: יש לפתוח את תוסף הדפדפן (Ssshmul), להיכנס להגדרות ⚙️ וללחוץ 'רענן עוגיות מהדפדפן', או לסגור את דפדפן Chrome לחלוטין.";
+                    }
+                    else if (fullErr.Contains("cookies are no longer valid", StringComparison.OrdinalIgnoreCase) ||
+                             fullErr.Contains("The provided YouTube account cookies", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "שגיאת עוגיות: העוגיות פגו. יש להיכנס להגדרות ⚙️ בתוסף הדפדפן וללחוץ על 'רענן עוגיות מהדפדפן'.";
+                    }
                     else if (fullErr.Contains("Sign in to confirm you're not a bot", StringComparison.OrdinalIgnoreCase) ||
                              fullErr.Contains("confirm your age", StringComparison.OrdinalIgnoreCase))
                     {
-                        err = "יוטיוב דורש אימות משתמש (הגנת בוטים/גיל). חבר קובץ עוגיות/התחבר לדפדפן";
+                        err = "יוטיוב דורש אימות: פתח את תוסף הדפדפן, היכנס להגדרות ⚙️ ולחץ 'רענן עוגיות מהדפדפן' (ודא שאתה מחובר ליוטיוב בדפדפן).";
                     }
                     else
                     {
@@ -485,7 +512,7 @@ namespace SsshmulDownloader.Engine
             }
         }
 
-        public static string MoveFilesSafely(string sourceDir, string targetDir)
+        public static string MoveFilesSafely(string sourceDir, string targetDir, bool isEmbedSubs = false)
         {
             if (!Directory.Exists(targetDir))
             {
@@ -500,8 +527,13 @@ namespace SsshmulDownloader.Engine
                     string fileName = Path.GetFileName(file);
                     if (fileName.Equals("cookies.txt", StringComparison.OrdinalIgnoreCase)) continue;
 
+                    string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                    if (isEmbedSubs && (ext == ".srt" || ext == ".vtt" || ext == ".ass" || ext == ".sub"))
+                    {
+                        continue; // Intermediate subtitle file already embedded into video by ffmpeg
+                    }
+
                     string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                    string ext = Path.GetExtension(fileName);
                     string targetPath = Path.Combine(targetDir, fileName);
 
                     int counter = 1;
@@ -533,7 +565,122 @@ namespace SsshmulDownloader.Engine
             return primaryFile;
         }
 
-        public static async Task<List<SearchResultItem>> SearchAsync(string query, int count, string? cookies = null, CancellationToken ct = default)
+        private static string ExtractCleanLyricsFromSrt(string srtContent)
+        {
+            var lines = srtContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            var sb = new StringBuilder();
+            string? lastLine = null;
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (int.TryParse(line, out _)) continue;
+                if (line.Contains("-->")) continue;
+                line = Regex.Replace(line, @"<[^>]+>", "").Trim();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line == lastLine) continue;
+                sb.AppendLine(line);
+                lastLine = line;
+            }
+            return sb.ToString().Trim();
+        }
+
+        private static async Task EmbedLyricsIntoMp3Async(string mp3Path, string srtPath, CancellationToken ct)
+        {
+            try
+            {
+                string ffmpegPath = BinaryResolver.FFmpegPath;
+                if (!File.Exists(ffmpegPath) || !File.Exists(mp3Path) || !File.Exists(srtPath)) return;
+
+                string srtText = await File.ReadAllTextAsync(srtPath, Encoding.UTF8, ct);
+                string lyrics = ExtractCleanLyricsFromSrt(srtText);
+                if (string.IsNullOrWhiteSpace(lyrics)) return;
+
+                string dir = Path.GetDirectoryName(mp3Path) ?? "";
+                string tempOut = Path.Combine(dir, "lyrics_" + Path.GetFileName(mp3Path));
+                string metaFile = Path.Combine(dir, "meta_" + Guid.NewGuid().ToString("N") + ".txt");
+
+                // Escape metadata in FFmetadata1 format
+                string escapedLyrics = lyrics.Replace("\\", "\\\\")
+                                             .Replace("=", "\\=")
+                                             .Replace(";", "\\;")
+                                             .Replace("#", "\\#")
+                                             .Replace("\r\n", "\\\n")
+                                             .Replace("\n", "\\\n");
+
+                string metaContent = $";FFMETADATA1\nlyrics={escapedLyrics}\nunsyncedlyrics={escapedLyrics}\nUSLT={escapedLyrics}\n";
+                await File.WriteAllTextAsync(metaFile, metaContent, new UTF8Encoding(false), ct);
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = ffmpegPath,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                psi.ArgumentList.Add("-y");
+                psi.ArgumentList.Add("-nostdin");
+                psi.ArgumentList.Add("-i");
+                psi.ArgumentList.Add(mp3Path);
+                psi.ArgumentList.Add("-i");
+                psi.ArgumentList.Add(metaFile);
+                psi.ArgumentList.Add("-map_metadata");
+                psi.ArgumentList.Add("0");
+                psi.ArgumentList.Add("-map_metadata");
+                psi.ArgumentList.Add("1");
+                psi.ArgumentList.Add("-id3v2_version");
+                psi.ArgumentList.Add("3");
+                psi.ArgumentList.Add("-c");
+                psi.ArgumentList.Add("copy");
+                psi.ArgumentList.Add(tempOut);
+
+                using var proc = Process.Start(psi);
+                if (proc != null)
+                {
+                    var readErr = proc.StandardError.ReadToEndAsync(ct);
+                    var readOut = proc.StandardOutput.ReadToEndAsync(ct);
+                    await Task.WhenAll(readErr, readOut);
+                    await proc.WaitForExitAsync(ct);
+
+                    if (proc.ExitCode == 0 && File.Exists(tempOut) && new FileInfo(tempOut).Length > 0)
+                    {
+                        File.Delete(mp3Path);
+                        File.Move(tempOut, mp3Path);
+                        try
+                        {
+                            File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] Successfully embedded lyrics into {Path.GetFileName(mp3Path)}\n");
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        string errStr = await readErr;
+                        try
+                        {
+                            File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] Failed to embed lyrics. ExitCode={proc.ExitCode}, Error: {errStr}\n");
+                        }
+                        catch { }
+                        if (File.Exists(tempOut)) File.Delete(tempOut);
+                    }
+                }
+
+                if (File.Exists(metaFile))
+                {
+                    File.Delete(metaFile);
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] ERROR: {ex.Message}\n");
+                }
+                catch { }
+            }
+        }
+
+        public static async Task<List<SearchResultItem>> SearchAsync(string query, int count, string? cookies = null, string sortBy = "latest", CancellationToken ct = default)
         {
             var results = new List<SearchResultItem>();
             string ytdlpPath = BinaryResolver.YtDlpPath;
@@ -542,7 +689,7 @@ namespace SsshmulDownloader.Engine
             int fetchCount = count <= 0 ? 500 : Math.Min(count, 1000);
             string logFile = PathUtils.GetLogFilePath();
 
-            // STEP 1: If query might be an artist, resolve their official YouTube channel and pull full catalog
+            // STEP 1: If query might be an artist, resolve their official YouTube channel and pull catalog sorted accordingly
             try
             {
                 var artist = await ArtistTracker.ArtistScanner.ResolveArtistInfoAsync(query);
@@ -550,6 +697,14 @@ namespace SsshmulDownloader.Engine
                 {
                     string targetUrl = artist.ChannelUrl;
                     if (!targetUrl.EndsWith("/videos")) targetUrl += "/videos";
+                    if (sortBy == "popular")
+                    {
+                        targetUrl += "?sort=p";
+                    }
+                    else if (sortBy == "latest" || sortBy == "newest")
+                    {
+                        targetUrl += "?sort=dd";
+                    }
 
                     var psiChannel = new ProcessStartInfo
                     {
@@ -641,7 +796,7 @@ namespace SsshmulDownloader.Engine
 
                     if (results.Count > 0)
                     {
-                        File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Search] Resolved via channel '{artist.Name}': {results.Count} songs\n");
+                        File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Search] Resolved via channel '{artist.Name}' ({sortBy}): {results.Count} songs\n");
                         return results;
                     }
                 }
@@ -653,6 +808,10 @@ namespace SsshmulDownloader.Engine
 
             // STEP 2: Direct ytsearch attempt
             string searchTarget = $"ytsearch{fetchCount}:{query}";
+            if (sortBy == "popular")
+            {
+                searchTarget = $"ytsearch{fetchCount}:{query} popular";
+            }
             var psi = new ProcessStartInfo
             {
                 FileName = ytdlpPath,
@@ -670,8 +829,16 @@ namespace SsshmulDownloader.Engine
             psi.ArgumentList.Add("--dump-single-json");
             psi.ArgumentList.Add("--no-check-certificates");
             psi.ArgumentList.Add("--prefer-insecure");
+            psi.ArgumentList.Add("--force-ipv4");
             psi.ArgumentList.Add("--socket-timeout");
             psi.ArgumentList.Add("15");
+
+            string qjs = BinaryResolver.QjsPath;
+            if (File.Exists(qjs))
+            {
+                psi.ArgumentList.Add("--js-runtimes");
+                psi.ArgumentList.Add($"quickjs:{qjs}");
+            }
 
             string? tempCookies = null;
             if (!string.IsNullOrWhiteSpace(cookies))
@@ -686,6 +853,15 @@ namespace SsshmulDownloader.Engine
                     psi.ArgumentList.Add(tempCookies);
                 }
                 catch { }
+            }
+            else
+            {
+                string savedCookies = PathUtils.GetSavedCookiesFilePath();
+                if (File.Exists(savedCookies))
+                {
+                    psi.ArgumentList.Add("--cookies");
+                    psi.ArgumentList.Add(savedCookies);
+                }
             }
 
             psi.ArgumentList.Add(searchTarget);

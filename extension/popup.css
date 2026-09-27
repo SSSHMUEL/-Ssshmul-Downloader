@@ -444,6 +444,49 @@ body {
     font-weight: 600;
 }
 
+.sort-selector-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sort-chips {
+    display: flex;
+    gap: 6px;
+}
+
+.sort-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--yt-spec-input-background);
+    border: 1px solid var(--yt-spec-outline);
+    color: var(--yt-spec-text-secondary);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sort-chip svg {
+    flex-shrink: 0;
+}
+
+.sort-chip:hover {
+    color: var(--yt-spec-text-primary);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sort-chip.active {
+    background: var(--yt-spec-blue-button);
+    border-color: var(--yt-spec-blue-button);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(62, 166, 255, 0.3);
+}
+
 /* Custom Count Manual Input */
 .custom-count-wrapper {
     display: inline-flex;

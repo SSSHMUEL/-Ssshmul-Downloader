@@ -36,9 +36,15 @@ namespace SsshmulDownloader.Models
         [JsonPropertyName("isOfficialAudio")]
         public bool IsOfficialAudio { get; set; }
 
+        [JsonPropertyName("uploader")]
+        public string? Uploader { get; set; }
+
+        [JsonPropertyName("channelId")]
+        public string? ChannelId { get; set; }
+
         public ArtistSong() { }
 
-        public ArtistSong(string videoId, string title, string url, string uploadDate, string duration, string thumbnail, bool isOfficialAudio = false)
+        public ArtistSong(string videoId, string title, string url, string uploadDate, string duration, string thumbnail, bool isOfficialAudio = false, string? uploader = null, string? channelId = null)
         {
             VideoId = videoId;
             Title = title;
@@ -48,6 +54,8 @@ namespace SsshmulDownloader.Models
             Thumbnail = thumbnail;
             IsDownloaded = false;
             IsOfficialAudio = isOfficialAudio;
+            Uploader = uploader;
+            ChannelId = channelId;
         }
     }
 

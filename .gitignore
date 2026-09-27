@@ -17,6 +17,12 @@ cookies.txt
 *.tmp
 *.old
 installer_output/
+scratch/
+**/scratch/**
+*.mp3
+*.mp4
+*.srt
+*.vtt
 
 ## User Data & Secrets
 settings.json

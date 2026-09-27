@@ -311,7 +311,7 @@ namespace SsshmulDownloader.ArtistTracker
 
             // CRITICAL REQUIREMENT: Intelligent Deduplication!
             // Only selects the best official audio/song version and completely avoids duplicate music video tracks
-            var deduplicatedSongs = DeduplicationEngine.DeduplicateArtistSongs(fetchedSongs, artist.Name);
+            var deduplicatedSongs = DeduplicationEngine.DeduplicateArtistSongs(fetchedSongs, artist.Name, artist.Id);
 
             // Check which songs are already downloaded on disk in artist folder
             string destFolder = !string.IsNullOrWhiteSpace(artist.DownloadFolder)
@@ -611,6 +611,8 @@ namespace SsshmulDownloader.ArtistTracker
                                 string url = GetStringProp(root, "url") ?? (videoId != null ? $"https://www.youtube.com/watch?v={videoId}" : "");
                                 string uploadDate = GetStringProp(root, "upload_date") ?? "";
                                 string duration = GetStringProp(root, "duration") ?? "";
+                                string? uploader = GetStringProp(root, "uploader") ?? GetStringProp(root, "channel");
+                                string? chanId = GetStringProp(root, "channel_id") ?? GetStringProp(root, "uploader_id");
                                 string thumb = "";
 
                                 if (root.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
@@ -624,7 +626,7 @@ namespace SsshmulDownloader.ArtistTracker
 
                                 if (!string.IsNullOrEmpty(videoId) && !DeduplicationEngine.IsShortOrPromo(title) && !url.Contains("/shorts/", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    fetchedSongs.Add(new ArtistSong(videoId, title, url, uploadDate, duration, thumb));
+                                    fetchedSongs.Add(new ArtistSong(videoId, title, url, uploadDate, duration, thumb, false, uploader, chanId));
                                 }
                             }
                             catch { }
@@ -787,6 +789,8 @@ namespace SsshmulDownloader.ArtistTracker
             foreach (var c in allCandidatePool)
             {
                 if (DeduplicationEngine.IsShortOrPromo(c.Title) || DeduplicationEngine.IsVariantOrNonStudioTrack(c.Title)) continue;
+                if (!DeduplicationEngine.IsFromOfficialArtistSource(c, artist.Name, artist.Id)) continue;
+
                 string norm = DeduplicationEngine.NormalizeSongTitle(c.Title, cleanArtist);
                 if (!string.IsNullOrWhiteSpace(norm))
                 {
@@ -805,7 +809,7 @@ namespace SsshmulDownloader.ArtistTracker
                 string norm = DeduplicationEngine.NormalizeSongTitle(track, cleanArtist);
                 if (poolByNormTitle.TryGetValue(norm, out var matches) && matches.Count > 0)
                 {
-                    var best = matches.OrderByDescending(m => DeduplicationEngine.GetSongScore(m)).First();
+                    var best = matches.OrderByDescending(m => DeduplicationEngine.GetSongScore(m, artist.Name, artist.Id)).First();
                     if (!seenVideoIds.Contains(best.VideoId))
                     {
                         seenVideoIds.Add(best.VideoId);
@@ -818,7 +822,7 @@ namespace SsshmulDownloader.ArtistTracker
                 }
             }
 
-            // Step D: If any specific tracks were missing from bulk scan, search ONLY the artist's Topic channel concurrently
+            // Step D: If any specific tracks were missing from bulk scan, search ONLY the artist's Topic channel
             if (missingTitles.Count > 0 && missingTitles.Count <= 35)
             {
                 var semaphore = new SemaphoreSlim(3, 3); // 3 parallel queries with staggered timing to prevent 429 rate limits
@@ -831,12 +835,19 @@ namespace SsshmulDownloader.ArtistTracker
                     try
                     {
                         if (ArtistStore.GetById(artist.Id) == null) return;
-                        string searchTarget = $"ytsearch3:{cleanArtist} {track} audio";
+                        string searchTarget = $"ytsearch3:{cleanArtist} - Topic {track}";
                         var directMatches = await FetchArtistSongsFromUrlsAsync(artist, new List<string> { searchTarget }, cookies, ytdlpPath, logFile);
-                        var cleanMatches = directMatches.Where(m => !DeduplicationEngine.IsShortOrPromo(m.Title) && !DeduplicationEngine.IsVariantOrNonStudioTrack(m.Title)).ToList();
+                        
+                        // Enforce ONLY official artist / topic sources and clean titles
+                        var cleanMatches = directMatches.Where(m => 
+                            !DeduplicationEngine.IsShortOrPromo(m.Title) && 
+                            !DeduplicationEngine.IsVariantOrNonStudioTrack(m.Title) &&
+                            DeduplicationEngine.IsFromOfficialArtistSource(m, artist.Name, artist.Id)
+                        ).ToList();
+
                         if (cleanMatches.Count > 0)
                         {
-                            var best = cleanMatches.OrderByDescending(m => DeduplicationEngine.GetSongScore(m)).First();
+                            var best = cleanMatches.OrderByDescending(m => DeduplicationEngine.GetSongScore(m, artist.Name, artist.Id)).First();
                             lock (lockObj)
                             {
                                 string normBest = DeduplicationEngine.NormalizeSongTitle(best.Title, cleanArtist);
@@ -858,7 +869,7 @@ namespace SsshmulDownloader.ArtistTracker
                 await Task.WhenAll(tasks);
             }
 
-            var finalCleanSongs = DeduplicationEngine.DeduplicateArtistSongs(resolvedSongs, artist.Name);
+            var finalCleanSongs = DeduplicationEngine.DeduplicateArtistSongs(resolvedSongs, artist.Name, artist.Id);
             File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Fast discography resolution finished. Matched {finalCleanSongs.Count} clean studio tracks for '{artist.Name}'.\n");
             return finalCleanSongs;
         }

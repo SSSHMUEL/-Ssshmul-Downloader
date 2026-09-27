@@ -655,12 +655,13 @@ namespace SsshmulDownloader.Server
                             string query = sqProp.GetString() ?? "";
                             int count = root.TryGetProperty("count", out var cProp) && cProp.TryGetInt32(out var ci) ? ci : 20;
                             string? cookies = root.TryGetProperty("cookies", out var ckProp) ? ckProp.GetString() : null;
+                            string sortBy = root.TryGetProperty("sortBy", out var sbProp) ? (sbProp.GetString() ?? "latest") : "latest";
 
                             _ = Task.Run(async () =>
                             {
                                 try
                                 {
-                                    var items = await YtDlpProcess.SearchAsync(query, count, cookies);
+                                    var items = await YtDlpProcess.SearchAsync(query, count, cookies, sortBy);
                                     await SendDirectAsync(ws, new DownloadMessage("search_results")
                                     {
                                         Query = query,

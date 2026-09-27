@@ -38,6 +38,7 @@ let detectedMedia = { url: '', title: '', thumbnail: '' };
 let videoPlaylist = [];
 let searchResults = [];
 let selectedSearchCount = 10;
+let selectedSearchSort = 'latest'; // 'latest' | 'popular'
 let currentAppTheme = 'dark';
 
 function applyTheme(theme, save = false) {
@@ -128,6 +129,7 @@ const resultsCountBadge = document.getElementById('results-count-badge');
 const selectAllResultsCb = document.getElementById('select-all-results');
 const addSelectedBtn = document.getElementById('add-selected-btn');
 const countChips = document.querySelectorAll('.count-chip');
+const sortChips = document.querySelectorAll('.sort-chip');
 const customCountInput = document.getElementById('custom-count-input');
 
 const urlInput = document.getElementById('url-input');
@@ -153,11 +155,14 @@ const cancelAllDownloadsBtn = document.getElementById('cancel-all-downloads-btn'
 const toggleAllPauseBtn = document.getElementById('toggle-all-pause-btn');
 
 // Toast notification
-function showToast(msg, duration = 3000) {
+let toastTimer = null;
+function showToast(msg, duration = 6000) {
     const toast = document.getElementById('toast');
+    if (!toast) return;
     toast.textContent = msg;
     toast.classList.remove('hidden');
-    setTimeout(() => toast.classList.add('hidden'), duration);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), duration);
 }
 
 function updateQualityBadge() {
@@ -800,14 +805,20 @@ function handleServerMessage(data) {
         percentEl.textContent = 'שגיאה';
         
         let friendlyErr = error || 'ההורדה נכשלה';
-        if (friendlyErr.includes('subtitles') && (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests') || friendlyErr.includes('HTTP Error'))) {
+        if (friendlyErr.includes('Chrome cookie') || friendlyErr.includes('PermissionError') || friendlyErr.includes('דפדפן Chrome נעול')) {
+            friendlyErr = 'שגיאת עוגיות: יש לפתוח את הגדרות התוסף ⚙️ וללחוץ "רענן עוגיות מהדפדפן", או לסגור את Chrome.';
+        } else if (friendlyErr.includes('cookies are no longer valid') || friendlyErr.includes('העוגיות פגו')) {
+            friendlyErr = 'שגיאת עוגיות: העוגיות פגו. יש להיכנס להגדרות ⚙️ בתוסף וללחוץ "רענן עוגיות מהדפדפן".';
+        } else if (friendlyErr.includes('אימות משתמש') || friendlyErr.includes('Sign in to confirm')) {
+            friendlyErr = 'יוטיוב דורש אימות: היכנס להגדרות ⚙️ בתוסף ולחץ "רענן עוגיות מהדפדפן" (ודא שאתה מחובר לחשבון).';
+        } else if (friendlyErr.includes('subtitles') && (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests') || friendlyErr.includes('HTTP Error'))) {
             friendlyErr = 'הורדת הכתוביות נכשלה (חסימת עומס 429 מיוטיוב ⚠️)';
         } else if (friendlyErr.includes('Blocked by NetFree') || friendlyErr.includes('418')) {
             friendlyErr = 'הסרטון חסום בנטפרי 🔒';
         } else if (friendlyErr.includes('unable to extract') || friendlyErr.includes('ffprobe') || friendlyErr.includes('PO Token')) {
             friendlyErr = 'שגיאת פענוח ביוטיוב. יש לעדכן את yt-dlp או לנסות שנית.';
-        } else if (friendlyErr.length > 120) {
-            friendlyErr = friendlyErr.substring(0, 115) + '...';
+        } else if (friendlyErr.length > 140) {
+            friendlyErr = friendlyErr.substring(0, 135) + '...';
         }
 
         statusDesc.textContent = friendlyErr;
@@ -1760,7 +1771,7 @@ async function proceedSingleDownload(video) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (storage.downloadSubsDefault === true) {
+    if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
         fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
     }
 
@@ -1776,7 +1787,7 @@ async function proceedSingleDownload(video) {
         playlist: false,
         qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
         cookies: cookies || null,
-        downloadSubs: isVideo && storage.downloadSubsDefault === true,
+        downloadSubs: storage.downloadSubsDefault === true,
         subsLang: storage.subsLangDefault || 'he',
         subsType: storage.subsTypeDefault || 'separate',
         tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
@@ -2023,7 +2034,7 @@ function handleServerSearchError(query, errorMsg) {
 }
 
 // Artist / Video Search Functions
-async function searchYouTubeArtist(query, maxResults = 10) {
+async function searchYouTubeArtist(query, maxResults = 10, sortBy = 'latest') {
     if (!query) return;
     
     const isAll = maxResults === 'all' || maxResults >= 9999;
@@ -2032,10 +2043,11 @@ async function searchYouTubeArtist(query, maxResults = 10) {
     const thisRequestId = currentSearchRequestId;
     
     searchResultsSection.classList.remove('hidden');
+    const sortLabel = sortBy === 'popular' ? 'הכי מושמעים' : 'הכי חדשים';
     searchResultsList.innerHTML = `
         <div class="search-loading-state">
             <div class="search-spinner"></div>
-            <span>${isAll ? `סורק דיסקוגרפיה רשמית מלאה עבור "${query}"...` : `מחפש ${targetCount} שירים מובילים עבור "${query}"...`}</span>
+            <span>${isAll ? `סורק דיסקוגרפיה רשמית מלאה עבור "${query}" (${sortLabel})...` : `מחפש ${targetCount} שירים (${sortLabel}) עבור "${query}"...`}</span>
         </div>
     `;
     resultsCountBadge.textContent = '...';
@@ -2052,7 +2064,8 @@ async function searchYouTubeArtist(query, maxResults = 10) {
                 type: 'search_youtube',
                 query: isAll ? (query + ' שירים') : query,
                 count: isAll ? 500 : targetCount,
-                cookies: cookies
+                cookies: cookies,
+                sortBy: sortBy
             }));
             return;
         } catch (e) {
@@ -2124,7 +2137,9 @@ async function searchYouTubeArtist(query, maxResults = 10) {
             }
         } else {
             // Direct YouTube search fallback (5/10/20/30)
-            const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' official music')}&sp=EgIQAQ%253D%253D`;
+            // sp=CAISAhAB (Sort by Upload Date, Video) or sp=CAMSAhAB (Sort by View Count, Video) / sp=EgIQAQ%253D%253D
+            const spParam = sortBy === 'popular' ? 'CAMSAhAB' : (sortBy === 'latest' ? 'CAISAhAB' : 'EgIQAQ%253D%253D');
+            const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' official music')}&sp=${spParam}`;
             const response = await fetch(searchUrl, {
                 headers: {
                     'Accept-Language': 'he,en;q=0.9',
@@ -2628,7 +2643,7 @@ async function proceedDownloadAll() {
         const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
         const selectedQuality = isVideo ? selectedMp4Quality : selectedMp3Quality;
 
-        if (storage.downloadSubsDefault === true) {
+        if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
             fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
         }
 
@@ -2644,7 +2659,7 @@ async function proceedDownloadAll() {
             playlist: false,
             qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
             cookies: cookies || null,
-            downloadSubs: isVideo && storage.downloadSubsDefault === true,
+            downloadSubs: storage.downloadSubsDefault === true,
             subsLang: storage.subsLangDefault || 'he',
             subsType: storage.subsTypeDefault || 'separate',
             tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
@@ -2730,7 +2745,7 @@ async function proceedDownload(url) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (isVideo && storage.downloadSubsDefault === true) {
+    if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
         fetchAndDownloadSubtitlesFromUrl(finalUrl, finalTitle);
     }
 
@@ -2746,7 +2761,7 @@ async function proceedDownload(url) {
         playlist: false,
         qualityText: isVideo ? 'וידאו (MP4)' : 'שמע (MP3) - גרסת אולפן',
         cookies: cookies || null,
-        downloadSubs: isVideo && storage.downloadSubsDefault === true,
+        downloadSubs: storage.downloadSubsDefault === true,
         subsLang: storage.subsLangDefault || 'he',
         subsType: storage.subsTypeDefault || 'separate',
         tagMappings: storage.customTagsEnabled ? (storage.tagMappings || null) : null
@@ -3249,43 +3264,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mode Switcher (Link vs Artist Search vs Artist Tracking)
     const formatTabsSection = document.querySelector('.format-tabs');
 
-    if (modeLinkBtn && modeSearchBtn && modeTrackingBtn) {
+    if (modeLinkBtn) {
         modeLinkBtn.addEventListener('click', () => {
             currentMode = 'link';
             modeLinkBtn.classList.add('active');
-            modeSearchBtn.classList.remove('active');
-            modeTrackingBtn.classList.remove('active');
-            linkInputSection.classList.remove('hidden');
-            artistSearchSection.classList.add('hidden');
+            if (modeSearchBtn) modeSearchBtn.classList.remove('active');
+            if (modeTrackingBtn) modeTrackingBtn.classList.remove('active');
+            if (linkInputSection) linkInputSection.classList.remove('hidden');
+            if (artistSearchSection) artistSearchSection.classList.add('hidden');
             if (artistTrackingInputSection) artistTrackingInputSection.classList.add('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.add('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
             updateQualityBadge();
             updateDownloadsVisibility();
         });
+    }
 
+    if (modeSearchBtn) {
         modeSearchBtn.addEventListener('click', () => {
             currentMode = 'search';
             modeSearchBtn.classList.add('active');
-            modeLinkBtn.classList.remove('active');
-            modeTrackingBtn.classList.remove('active');
-            linkInputSection.classList.add('hidden');
-            artistSearchSection.classList.remove('hidden');
+            if (modeLinkBtn) modeLinkBtn.classList.remove('active');
+            if (modeTrackingBtn) modeTrackingBtn.classList.remove('active');
+            if (linkInputSection) linkInputSection.classList.add('hidden');
+            if (artistSearchSection) artistSearchSection.classList.remove('hidden');
             if (artistTrackingInputSection) artistTrackingInputSection.classList.add('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.add('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
             updateQualityBadge();
             updateDownloadsVisibility();
-            artistQueryInput.focus();
+            if (artistQueryInput) artistQueryInput.focus();
         });
+    }
 
+    if (modeTrackingBtn) {
         modeTrackingBtn.addEventListener('click', () => {
             currentMode = 'tracking';
             modeTrackingBtn.classList.add('active');
-            modeLinkBtn.classList.remove('active');
-            modeSearchBtn.classList.remove('active');
-            linkInputSection.classList.add('hidden');
-            artistSearchSection.classList.add('hidden');
+            if (modeLinkBtn) modeLinkBtn.classList.remove('active');
+            if (modeSearchBtn) modeSearchBtn.classList.remove('active');
+            if (linkInputSection) linkInputSection.classList.add('hidden');
+            if (artistSearchSection) artistSearchSection.classList.add('hidden');
             if (artistTrackingInputSection) artistTrackingInputSection.classList.remove('hidden');
             if (artistTrackingSection) artistTrackingSection.classList.remove('hidden');
             if (formatTabsSection) formatTabsSection.classList.remove('hidden');
@@ -3298,6 +3317,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Search Sort Chips (Latest vs Popular)
+    sortChips.forEach(chip => {
+        chip.addEventListener('click', () => {
+            sortChips.forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            selectedSearchSort = chip.getAttribute('data-sort') || 'latest';
+        });
+    });
 
     // Search Count Chips
     countChips.forEach(chip => {
@@ -3356,7 +3384,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
             return;
         }
-        searchYouTubeArtist(query, selectedSearchCount);
+        searchYouTubeArtist(query, selectedSearchCount, selectedSearchSort);
     };
 
     if (artistSearchBtn) {
