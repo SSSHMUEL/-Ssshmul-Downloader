@@ -1,7 +1,7 @@
 ; Script generated for Inno Setup 6.x
 #define MyAppName "Ssshmul Downloader"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #endif
 #define MyAppPublisher "Ssshmul"
 #define MyAppURL "https://github.com/SSSHMUEL/-Ssshmul-Downloader"

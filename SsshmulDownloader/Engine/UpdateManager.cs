@@ -37,7 +37,7 @@ namespace SsshmulDownloader.Engine
                 int plusIdx = infoVer.IndexOf('+');
                 return plusIdx > 0 ? infoVer[..plusIdx] : infoVer;
             }
-            return assembly.GetName().Version?.ToString(3) ?? "1.0.2";
+            return assembly.GetName().Version?.ToString(3) ?? "1.0.3";
         }
 
         public static async Task<UpdateInfo> CheckForUpdatesAsync()
