@@ -4382,7 +4382,7 @@ const talkfixAdCard = document.getElementById('talkfix-ad-card');
 if (talkfixAdCard) {
     talkfixAdCard.addEventListener('click', (e) => {
         e.preventDefault();
-        openExternalLink('https://talkfix.app/');
+        openExternalLink('https://talkfix.app/?ref=ssshmul_downloader&c=downloader_app');
     });
 }
 
