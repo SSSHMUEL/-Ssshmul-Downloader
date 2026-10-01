@@ -1082,7 +1082,7 @@ function tryInjectButton() {
 
         // 3. TalkFix Promo Pill Button
         const talkfixPill = document.createElement('a');
-        talkfixPill.href = 'https://talkfix.app/';
+        talkfixPill.href = 'https://talkfix.app/?ref=ssshmul_downloader&c=downloader_app';
         talkfixPill.target = '_blank';
         talkfixPill.rel = 'noopener noreferrer';
         talkfixPill.className = 'nf-yt-btn nf-talkfix-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m';
