@@ -664,6 +664,20 @@ namespace SsshmulDownloader.Server
                         }
                         break;
 
+                    case "set_subs_settings":
+                    {
+                        bool dsEnabled = root.TryGetProperty("downloadSubs", out var dsP) && dsP.ValueKind == JsonValueKind.True;
+                        string dsLang = root.TryGetProperty("subsLang", out var dlP) ? (dlP.GetString() ?? "he") : "he";
+                        string dsType = root.TryGetProperty("subsType", out var dtP) ? (dtP.GetString() ?? "separate") : "separate";
+                        SettingsStore.Update(s =>
+                        {
+                            s.DownloadSubsDefault = dsEnabled;
+                            s.SubsLangDefault = dsLang;
+                            s.SubsTypeDefault = dsType;
+                        });
+                        break;
+                    }
+
                     case "set_theme":
                         if (root.TryGetProperty("theme", out var themeProp))
                         {

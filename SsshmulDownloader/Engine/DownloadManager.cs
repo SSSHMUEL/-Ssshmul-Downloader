@@ -18,6 +18,8 @@ namespace SsshmulDownloader.Engine
 
         private readonly ConcurrentDictionary<string, DownloadContext> _activeDownloads = new();
         private readonly SemaphoreSlim _downloadConcurrencySemaphore = new(3, 3);
+        private readonly SemaphoreSlim _subsStaggerLock = new(1, 1);
+        private DateTime _nextSubsStart = DateTime.MinValue;
         public event Action<DownloadMessage>? MessageBroadcast;
 
         public void Broadcast(DownloadMessage message)
@@ -295,6 +297,18 @@ namespace SsshmulDownloader.Engine
 
                 await _downloadConcurrencySemaphore.WaitAsync(ctx.Cts.Token);
                 semaphoreAcquired = true;
+
+                if (ctx.Subs != null)
+                {
+                    await _subsStaggerLock.WaitAsync(ctx.Cts.Token);
+                    try
+                    {
+                        var wait = _nextSubsStart - DateTime.UtcNow;
+                        if (wait > TimeSpan.Zero) await Task.Delay(wait, ctx.Cts.Token);
+                        _nextSubsStart = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+                    }
+                    finally { _subsStaggerLock.Release(); }
+                }
 
                 if (ctx.IsCancelled)
                 {

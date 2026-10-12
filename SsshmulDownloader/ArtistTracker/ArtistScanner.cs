@@ -624,6 +624,11 @@ namespace SsshmulDownloader.ArtistTracker
                 .OrderByDescending(s => DeduplicationEngine.GetSongScore(s, artist.Name, artist.Id))
                 .ToList();
 
+            var appSettings = SsshmulDownloader.Storage.SettingsStore.Current;
+            SsshmulDownloader.Models.SubsOptions? subsOpts = appSettings.DownloadSubsDefault
+                ? new SsshmulDownloader.Models.SubsOptions(appSettings.SubsLangDefault ?? "he", appSettings.SubsTypeDefault ?? "separate")
+                : null;
+
             foreach (var song in ordered)
             {
                 string key = DeduplicationEngine.NormalizeSongTitle(song.Title, cleanName);
@@ -649,7 +654,7 @@ namespace SsshmulDownloader.ArtistTracker
                     playlistTitle: null,
                     qualityText: isVideo ? "הורדת וידאו (מעקב אמן)" : "הורדת שמע (מעקב אמן)",
                     cookies: null,
-                    subs: null,
+                    subs: subsOpts,
                     tagMappings: null
                 );
             }

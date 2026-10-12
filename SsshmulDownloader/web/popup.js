@@ -413,6 +413,7 @@ function connectWebSocket() {
             const resolvedTheme = currentAppTheme === 'system' ? 
                 (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : currentAppTheme;
             ws.send(JSON.stringify({ type: 'set_theme', theme: resolvedTheme }));
+            syncSubsSettingsToServer();
         };
 
         ws.onclose = () => {
@@ -2903,6 +2904,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateQualityBadge();
 
         // Subtitles settings initialization
+        syncSubsSettingsToServer();
         const subsToggle = document.getElementById('subs-toggle');
         const subsSubOptions = document.getElementById('subs-sub-options');
         const downloadSubs = res.downloadSubsDefault === true;
@@ -2917,7 +2919,7 @@ document.addEventListener('DOMContentLoaded', () => {
             subsToggle.addEventListener('change', (e) => {
                 const enabled = e.target.checked;
                 if (subsSubOptions) subsSubOptions.classList.toggle('hidden', !enabled);
-                chrome.storage.local.set({ downloadSubsDefault: enabled });
+                Promise.resolve(chrome.storage.local.set({ downloadSubsDefault: enabled })).then(syncSubsSettingsToServer);
                 // Show inline message in settings card
                 const subsCard = document.querySelector('.settings-card:nth-child(4)'); // Subtitles card
                 if (subsCard) {
@@ -2937,7 +2939,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const lang = e.currentTarget.getAttribute('data-lang');
                 document.querySelectorAll('#subs-lang-chips .chip').forEach(c => c.classList.remove('active'));
                 e.currentTarget.classList.add('active');
-                chrome.storage.local.set({ subsLangDefault: lang });
+                Promise.resolve(chrome.storage.local.set({ subsLangDefault: lang })).then(syncSubsSettingsToServer);
             });
         });
 
@@ -2948,7 +2950,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const typeOpt = e.currentTarget.getAttribute('data-type-opt');
                 document.querySelectorAll('#subs-type-chips .chip').forEach(c => c.classList.remove('active'));
                 e.currentTarget.classList.add('active');
-                chrome.storage.local.set({ subsTypeDefault: typeOpt });
+                Promise.resolve(chrome.storage.local.set({ subsTypeDefault: typeOpt })).then(syncSubsSettingsToServer);
             });
         });
 
@@ -4420,3 +4422,14 @@ if (talkfixAdCard) {
     });
 }
 
+
+
+// Sends subtitle settings to the desktop app so artist-tracker background downloads use them too
+async function syncSubsSettingsToServer() {
+    try {
+        const s = await chrome.storage.local.get(['downloadSubsDefault', 'subsLangDefault', 'subsTypeDefault']);
+        if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'set_subs_settings', downloadSubs: s.downloadSubsDefault === true, subsLang: s.subsLangDefault || 'he', subsType: s.subsTypeDefault || 'separate' }));
+        }
+    } catch (e) { }
+}

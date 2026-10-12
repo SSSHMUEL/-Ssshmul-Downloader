@@ -7,6 +7,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System.Text.Json;
 using SsshmulDownloader.Models;
 using SsshmulDownloader.Storage;
 
@@ -31,6 +33,228 @@ namespace SsshmulDownloader.Engine
         private static readonly Regex ProgressRegex = new(@"\[download\]\s+([0-9.]+)%\s+of\s+.*?\s+at\s+(.*?\/s)", RegexOptions.Compiled);
         private static readonly Regex PlaylistProgressRegex = new(@"\[download\] Downloading item (\d+) of (\d+)", RegexOptions.Compiled);
         private static readonly Regex DestinationRegex = new(@"\[(?:download|ExtractAudio|Merger|ffmpeg)\] Destination:\s*(.*)", RegexOptions.Compiled);
+        private static readonly HttpClient _httpClient = new HttpClient();
+
+        static YtDlpProcess()
+        {
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SsshmulDownloader/1.0 (https://github.com/talkfix/SsshmulDownloader)");
+            _httpClient.Timeout = TimeSpan.FromSeconds(10);
+        }
+
+        public static async Task<string?> FetchLrcLyricsAsync(string trackName, string? artistName, CancellationToken ct = default)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(trackName)) return null;
+
+                // Extract artist and clean song title if possible
+                string cleanTrack = SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanSongTitle(trackName);
+                string? cleanArtist = !string.IsNullOrWhiteSpace(artistName) 
+                    ? SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanArtistName(artistName) 
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(cleanArtist) && cleanTrack.Contains(" - "))
+                {
+                    var parts = cleanTrack.Split(new[] { " - " }, 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 2)
+                    {
+                        cleanArtist = parts[0].Trim();
+                        cleanTrack = parts[1].Trim();
+                    }
+                }
+
+                // Query LRCLIB - 1. Direct get
+                if (!string.IsNullOrWhiteSpace(cleanArtist))
+                {
+                    string url = $"https://lrclib.net/api/get?artist_name={Uri.EscapeDataString(cleanArtist)}&track_name={Uri.EscapeDataString(cleanTrack)}";
+                    using var resp = await _httpClient.GetAsync(url, ct);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        var json = await resp.Content.ReadAsStringAsync(ct);
+                        using var jsonDoc = JsonDocument.Parse(json);
+                        if (jsonDoc.RootElement.TryGetProperty("syncedLyrics", out var syn) && !string.IsNullOrWhiteSpace(syn.GetString()))
+                            return syn.GetString();
+                        if (jsonDoc.RootElement.TryGetProperty("plainLyrics", out var pl) && !string.IsNullOrWhiteSpace(pl.GetString()))
+                            return pl.GetString();
+                    }
+                }
+
+                // 2. Search by track + artist
+                if (!string.IsNullOrWhiteSpace(cleanArtist))
+                {
+                    string searchUrl = $"https://lrclib.net/api/search?track_name={Uri.EscapeDataString(cleanTrack)}&artist_name={Uri.EscapeDataString(cleanArtist)}";
+                    using var searchResp = await _httpClient.GetAsync(searchUrl, ct);
+                    if (searchResp.IsSuccessStatusCode)
+                    {
+                        var searchJson = await searchResp.Content.ReadAsStringAsync(ct);
+                        using var doc = JsonDocument.Parse(searchJson);
+                        if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                        {
+                            var first = doc.RootElement[0];
+                            if (first.TryGetProperty("syncedLyrics", out var syn) && !string.IsNullOrWhiteSpace(syn.GetString()))
+                                return syn.GetString();
+                            if (first.TryGetProperty("plainLyrics", out var pl) && !string.IsNullOrWhiteSpace(pl.GetString()))
+                                return pl.GetString();
+                        }
+                    }
+                }
+
+                // 3. Fallback: general search with "artist track" or just "track"
+                string generalQuery = !string.IsNullOrWhiteSpace(cleanArtist) ? $"{cleanArtist} {cleanTrack}" : cleanTrack;
+                string qUrl = $"https://lrclib.net/api/search?q={Uri.EscapeDataString(generalQuery)}";
+                using var qResp = await _httpClient.GetAsync(qUrl, ct);
+                if (qResp.IsSuccessStatusCode)
+                {
+                    var qJson = await qResp.Content.ReadAsStringAsync(ct);
+                    using var qDoc = JsonDocument.Parse(qJson);
+                    if (qDoc.RootElement.ValueKind == JsonValueKind.Array && qDoc.RootElement.GetArrayLength() > 0)
+                    {
+                        var first = qDoc.RootElement[0];
+                        if (first.TryGetProperty("syncedLyrics", out var syn) && !string.IsNullOrWhiteSpace(syn.GetString()))
+                            return syn.GetString();
+                        if (first.TryGetProperty("plainLyrics", out var pl) && !string.IsNullOrWhiteSpace(pl.GetString()))
+                            return pl.GetString();
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [LRCLIB] Lookup error: {ex.Message}\n");
+                }
+                catch { }
+                return null;
+            }
+        }
+
+        public static async Task<string> TranslateLrcToBilingualAsync(string lrcContent, string targetLang = "he", CancellationToken ct = default)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(lrcContent)) return lrcContent;
+
+                var lines = lrcContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                var timeRx = new Regex(@"^(\[\d+:\d+(?:\.\d+)?\])+(.*)$");
+
+                var timeTags = new List<string>();
+                var textsToTranslate = new List<string>();
+
+                foreach (var line in lines)
+                {
+                    var m = timeRx.Match(line.Trim());
+                    if (m.Success)
+                    {
+                        timeTags.Add(m.Groups[1].Value);
+                        textsToTranslate.Add(m.Groups[2].Value.Trim());
+                    }
+                    else
+                    {
+                        timeTags.Add("");
+                        textsToTranslate.Add(line.Trim());
+                    }
+                }
+
+                if (textsToTranslate.Count == 0 || !textsToTranslate.Any(t => !string.IsNullOrWhiteSpace(t) && Regex.IsMatch(t, @"[A-Za-z]")))
+                {
+                    return lrcContent;
+                }
+
+                // Prepare batch text with newline separation for Google Translate
+                string combinedForTrans = string.Join("\n", textsToTranslate.Select(t => string.IsNullOrWhiteSpace(t) ? "---" : t));
+
+                string destLang = (targetLang.Contains("he") || targetLang.Contains("iw")) ? "iw" : targetLang;
+                using var form = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("client", "gtx"),
+                    new KeyValuePair<string, string>("sl", "auto"),
+                    new KeyValuePair<string, string>("tl", destLang),
+                    new KeyValuePair<string, string>("dt", "t"),
+                    new KeyValuePair<string, string>("q", combinedForTrans)
+                });
+
+                using var resp = await _httpClient.PostAsync("https://translate.googleapis.com/translate_a/single", form, ct);
+                if (!resp.IsSuccessStatusCode) return lrcContent;
+
+                var jsonStr = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(jsonStr);
+
+                var translatedSb = new StringBuilder();
+                if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                {
+                    var parts = doc.RootElement[0];
+                    if (parts.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var part in parts.EnumerateArray())
+                        {
+                            if (part.ValueKind == JsonValueKind.Array && part.GetArrayLength() > 0)
+                            {
+                                translatedSb.Append(part[0].GetString());
+                            }
+                        }
+                    }
+                }
+
+                string translatedFull = translatedSb.ToString();
+                if (string.IsNullOrWhiteSpace(translatedFull)) return lrcContent;
+
+                var translatedLines = translatedFull.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                var resSb = new StringBuilder();
+
+                for (int i = 0; i < textsToTranslate.Count; i++)
+                {
+                    string tag = timeTags[i];
+                    string en = textsToTranslate[i];
+                    string he = i < translatedLines.Length ? translatedLines[i].Trim() : "";
+                    if (he == "---") he = "";
+
+                    if (string.IsNullOrWhiteSpace(en))
+                    {
+                        if (!string.IsNullOrWhiteSpace(tag)) resSb.AppendLine(tag);
+                        continue;
+                    }
+
+                    // Format: First English line, then Hebrew line underneath, with a slight offset or clean spacing
+                    if (targetLang.Contains("he") && targetLang.Contains("en") || targetLang == "he,en" || targetLang == "he")
+                    {
+                        if (!string.IsNullOrWhiteSpace(tag))
+                        {
+                            resSb.AppendLine($"{tag}{en}");
+                            if (!string.IsNullOrWhiteSpace(he) && !string.Equals(he, en, StringComparison.OrdinalIgnoreCase))
+                            {
+                                resSb.AppendLine($"{tag}{he}");
+                            }
+                        }
+                        else
+                        {
+                            resSb.AppendLine(en);
+                            if (!string.IsNullOrWhiteSpace(he) && !string.Equals(he, en, StringComparison.OrdinalIgnoreCase))
+                            {
+                                resSb.AppendLine(he);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrWhiteSpace(tag)) resSb.AppendLine($"{tag}{en}");
+                        else resSb.AppendLine(en);
+                    }
+                }
+
+                return resSb.ToString().Trim();
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Translate] Translation error: {ex.Message}\n");
+                }
+                catch { }
+                return lrcContent;
+            }
+        }
 
         public static List<string> BuildArguments(
             string url,
@@ -119,9 +343,10 @@ namespace SsshmulDownloader.Engine
             if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang))
             {
                 string subLang = subs.Lang.Trim();
-                if (subLang == "he,en") subLang = "he.*,iw.*,en.*,he-orig,iw-orig,en-orig";
-                else if (subLang == "he") subLang = "he.*,iw.*,he-orig,iw-orig";
-                else if (subLang == "en") subLang = "en.*,en-orig";
+                const string enSrc = "en.*,-en-[a-z]{2,3}(-[A-Za-z]+)?-.*";
+                if (subLang == "he,en") subLang = "he,iw,he-orig,iw-orig,iw-en.*,he-en.*," + enSrc;
+                else if (subLang == "he") subLang = "he,iw,he-orig,iw-orig,iw-en.*,he-en.*";
+                else if (subLang == "en") subLang = enSrc;
 
                 args.Add("--write-subs");
                 args.Add("--write-auto-subs");
@@ -132,7 +357,13 @@ namespace SsshmulDownloader.Engine
                 args.Add("--no-abort-on-error");
                 args.Add("--ignore-no-formats-error");
                 args.Add("--extractor-args");
-                args.Add("youtube:player_client=android,ios,web_creator");
+                args.Add("youtube:player_client=android,ios,web_creator,tv,web");
+                args.Add("--extractor-retries"); args.Add("5");
+                args.Add("--retries"); args.Add("10");
+                args.Add("--retry-sleep"); args.Add("http:exp=1:30");
+                args.Add("--retry-sleep"); args.Add("extractor:exp=2:30");
+                args.Add("--sleep-requests"); args.Add("1.5");
+                args.Add("--sleep-subtitles"); args.Add("2");
 
                 if (subs.Type == "embed" && !isAudio)
                 {
@@ -446,21 +677,100 @@ namespace SsshmulDownloader.Engine
                     bool isVideo = ctx.IsVideo || (ctx.FormatId != null && !ctx.FormatId.StartsWith("mp3") && ctx.FormatId != "raw_audio" && ctx.FormatId != "generic_audio");
                     bool isEmbedSubs = ctx.Subs != null && ctx.Subs.Type == "embed";
 
-                    if (!isVideo && isEmbedSubs)
+                    if (!isVideo && ctx.Subs != null)
                     {
                         try
                         {
                             var mp3Files = Directory.GetFiles(tempDir, "*.mp3");
                             var srtFiles = Directory.GetFiles(tempDir, "*.srt").Concat(Directory.GetFiles(tempDir, "*.vtt")).ToList();
-                            if (mp3Files.Length > 0 && srtFiles.Count > 0)
+
+                            // Fallback: If YouTube provided NO subtitles, fetch synchronized lyrics from LRCLIB
+                            if (srtFiles.Count == 0 && mp3Files.Length > 0)
                             {
                                 foreach (var mp3 in mp3Files)
                                 {
-                                    await EmbedLyricsIntoMp3Async(mp3, srtFiles[0], ct);
+                                    string trackBase = Path.GetFileNameWithoutExtension(mp3);
+                                    string? artistHint = null;
+                                    if (!string.IsNullOrWhiteSpace(ctx.DestinationPath))
+                                    {
+                                        string folderName = Path.GetFileName(ctx.DestinationPath.TrimEnd('\\', '/'));
+                                        if (!string.IsNullOrWhiteSpace(folderName) && !folderName.Equals("Downloads", StringComparison.OrdinalIgnoreCase) && !folderName.Equals("Music", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            artistHint = folderName;
+                                        }
+                                    }
+                                    if (string.IsNullOrWhiteSpace(artistHint))
+                                    {
+                                        artistHint = ctx.PlaylistTitle ?? ctx.CustomTitle;
+                                    }
+
+                                    string? lyricsText = await FetchLrcLyricsAsync(trackBase, artistHint, ct);
+                                    if (!string.IsNullOrWhiteSpace(lyricsText))
+                                    {
+                                        string requestedLang = ctx.Subs?.Lang?.Trim().ToLowerInvariant() ?? "he";
+                                        if (requestedLang.Contains("he") || requestedLang.Contains("iw"))
+                                        {
+                                            try
+                                            {
+                                                lyricsText = await TranslateLrcToBilingualAsync(lyricsText, requestedLang, ct);
+                                            }
+                                            catch { }
+                                        }
+
+                                        if (isEmbedSubs)
+                                        {
+                                            try
+                                            {
+                                                TagLib.Id3v2.Tag.DefaultVersion = 3;
+                                                TagLib.Id3v2.Tag.ForceDefaultVersion = true;
+                                                using (var tf = TagLib.File.Create(mp3))
+                                                {
+                                                    tf.Tag.Lyrics = lyricsText;
+                                                    tf.Save();
+                                                }
+                                                File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [LRCLIB] Embedded fallback lyrics into {Path.GetFileName(mp3)} ({lyricsText.Length} chars)\n");
+                                            }
+                                            catch { }
+                                        }
+                                        else
+                                        {
+                                            // Save as external .lrc file
+                                            string lrcPath = Path.Combine(tempDir, $"{trackBase}.lrc");
+                                            await File.WriteAllTextAsync(lrcPath, lyricsText, new UTF8Encoding(false), ct);
+                                            File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [LRCLIB] Saved external .lrc file for {trackBase} ({lyricsText.Length} chars)\n");
+                                        }
+                                    }
+                                }
+                            }
+                            else if (isEmbedSubs && srtFiles.Count > 0 && mp3Files.Length > 0)
+                            {
+                                TryMergeBilingualSubtitles(tempDir);
+                                var langRx = new Regex(@"\.(?<lang>[a-z]{2,3})(?<suffix>-[A-Za-z0-9\-]+)?\.(srt|vtt)$", RegexOptions.IgnoreCase);
+                                var orderedSubs = Directory.GetFiles(tempDir, "*.srt").Concat(Directory.GetFiles(tempDir, "*.vtt"))
+                                    .OrderBy(f =>
+                                    {
+                                        var m = langRx.Match(Path.GetFileName(f));
+                                        if (!m.Success) return 0; // merged bilingual file
+                                        if (!m.Groups["suffix"].Success) return 1;
+                                        return m.Groups["suffix"].Value.Equals("-orig", StringComparison.OrdinalIgnoreCase) ? 2 : 3;
+                                    })
+                                    .ThenBy(f => f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                                    .ToList();
+
+                                foreach (var mp3 in mp3Files)
+                                {
+                                    await EmbedLyricsIntoMp3Async(mp3, orderedSubs[0], ct);
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            try
+                            {
+                                File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [SubsProcess] ERROR: {ex.Message}\n");
+                            }
+                            catch { }
+                        }
                     }
 
                     string finalPath = MoveFilesSafely(tempDir, targetFolder, isEmbedSubs, !isVideo);
@@ -644,6 +954,29 @@ namespace SsshmulDownloader.Engine
                     }
                 }
 
+                // Keep only ONE subtitle per language (iw == he): prefer exact code, then -orig, then any variant
+                if (!isEmbedSubs && srtAndVtt.Count > 1)
+                {
+                    var langRx = new Regex(@"\.(?<lang>[a-z]{2,3})(?<suffix>-[A-Za-z0-9\-]+)?\.(srt|vtt|ass|sub)$", RegexOptions.IgnoreCase);
+                    var groups = srtAndVtt
+                        .Select(f => (file: f, m: langRx.Match(Path.GetFileName(f))))
+                        .Where(x => x.m.Success)
+                        .GroupBy(x => { var l = x.m.Groups["lang"].Value.ToLowerInvariant(); return l == "iw" ? "he" : l; })
+                        .ToList();
+                    foreach (var g in groups)
+                    {
+                        var keep = g.OrderBy(x => !x.m.Groups["suffix"].Success ? 0 :
+                                                  x.m.Groups["suffix"].Value.Equals("-orig", StringComparison.OrdinalIgnoreCase) ? 1 : 2)
+                                    .ThenBy(x => x.file.Length).First().file;
+                        foreach (var x in g.Where(x => x.file != keep).ToList())
+                        {
+                            try { File.Delete(x.file); } catch { }
+                            allFiles.Remove(x.file);
+                            srtAndVtt.Remove(x.file);
+                        }
+                    }
+                }
+
                 // First find the primary media file name so subtitle can cleanly match it
                 string? baseMediaCleanName = null;
                 var mediaFile = allFiles.FirstOrDefault(f =>
@@ -797,86 +1130,25 @@ namespace SsshmulDownloader.Engine
         {
             try
             {
-                string ffmpegPath = BinaryResolver.FFmpegPath;
-                if (!File.Exists(ffmpegPath) || !File.Exists(mp3Path) || !File.Exists(srtPath)) return;
+                if (!File.Exists(mp3Path) || !File.Exists(srtPath)) return;
 
                 string srtText = await File.ReadAllTextAsync(srtPath, Encoding.UTF8, ct);
-                string lyrics = ExtractCleanLyricsFromSrt(srtText);
+                string lyrics = ConvertSrtToLrc(srtText);
+                if (string.IsNullOrWhiteSpace(lyrics) || !lyrics.Contains("[")) lyrics = ExtractCleanLyricsFromSrt(srtText);
                 if (string.IsNullOrWhiteSpace(lyrics)) return;
 
-                string dir = Path.GetDirectoryName(mp3Path) ?? "";
-                string tempOut = Path.Combine(dir, "lyrics_" + Path.GetFileName(mp3Path));
-                string metaFile = Path.Combine(dir, "meta_" + Guid.NewGuid().ToString("N") + ".txt");
-
-                // Escape metadata in FFmetadata1 format
-                string escapedLyrics = lyrics.Replace("\\", "\\\\")
-                                             .Replace("=", "\\=")
-                                             .Replace(";", "\\;")
-                                             .Replace("#", "\\#")
-                                             .Replace("\r\n", "\\\n")
-                                             .Replace("\n", "\\\n");
-
-                string metaContent = $";FFMETADATA1\nlyrics={escapedLyrics}\nunsyncedlyrics={escapedLyrics}\nUSLT={escapedLyrics}\n";
-                await File.WriteAllTextAsync(metaFile, metaContent, new UTF8Encoding(false), ct);
-
-                var psi = new ProcessStartInfo
+                TagLib.Id3v2.Tag.DefaultVersion = 3;
+                TagLib.Id3v2.Tag.ForceDefaultVersion = true;
+                using (var tf = TagLib.File.Create(mp3Path))
                 {
-                    FileName = ffmpegPath,
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                psi.ArgumentList.Add("-y");
-                psi.ArgumentList.Add("-nostdin");
-                psi.ArgumentList.Add("-i");
-                psi.ArgumentList.Add(mp3Path);
-                psi.ArgumentList.Add("-i");
-                psi.ArgumentList.Add(metaFile);
-                psi.ArgumentList.Add("-map_metadata");
-                psi.ArgumentList.Add("0");
-                psi.ArgumentList.Add("-map_metadata");
-                psi.ArgumentList.Add("1");
-                psi.ArgumentList.Add("-id3v2_version");
-                psi.ArgumentList.Add("3");
-                psi.ArgumentList.Add("-c");
-                psi.ArgumentList.Add("copy");
-                psi.ArgumentList.Add(tempOut);
-
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    var readErr = proc.StandardError.ReadToEndAsync(ct);
-                    var readOut = proc.StandardOutput.ReadToEndAsync(ct);
-                    await Task.WhenAll(readErr, readOut);
-                    await proc.WaitForExitAsync(ct);
-
-                    if (proc.ExitCode == 0 && File.Exists(tempOut) && new FileInfo(tempOut).Length > 0)
-                    {
-                        File.Delete(mp3Path);
-                        File.Move(tempOut, mp3Path);
-                        try
-                        {
-                            File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] Successfully embedded lyrics into {Path.GetFileName(mp3Path)}\n");
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        string errStr = await readErr;
-                        try
-                        {
-                            File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] Failed to embed lyrics. ExitCode={proc.ExitCode}, Error: {errStr}\n");
-                        }
-                        catch { }
-                        if (File.Exists(tempOut)) File.Delete(tempOut);
-                    }
+                    tf.Tag.Lyrics = lyrics; // writes a standard ID3v2 USLT frame
+                    tf.Save();
                 }
-
-                if (File.Exists(metaFile))
+                try
                 {
-                    File.Delete(metaFile);
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] Embedded USLT lyrics via TagLib into {Path.GetFileName(mp3Path)} ({lyrics.Length} chars)\n");
                 }
+                catch { }
             }
             catch (Exception ex)
             {
