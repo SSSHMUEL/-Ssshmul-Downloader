@@ -60,6 +60,42 @@ namespace SsshmulDownloader.Engine
                     _ = RunDownloadTask(existingCtx);
                     return;
                 }
+
+                // If already active/running/requesting with this ID, ignore redundant trigger
+                if (!existingCtx.IsCancelled)
+                {
+                    return;
+                }
+            }
+
+            // Deduplication: prevent duplicate downloads for the same URL or custom title already active
+            var duplicateActive = _activeDownloads.Values.FirstOrDefault(ctx =>
+                !ctx.IsCancelled &&
+                (string.Equals(ctx.Url, url, StringComparison.OrdinalIgnoreCase) ||
+                 (!string.IsNullOrWhiteSpace(customTitle) && !string.IsNullOrWhiteSpace(ctx.CustomTitle) &&
+                  string.Equals(ctx.CustomTitle, customTitle, StringComparison.OrdinalIgnoreCase))));
+
+            if (duplicateActive != null)
+            {
+                return;
+            }
+
+            string? targetDestination = destinationPath;
+            if (string.IsNullOrWhiteSpace(targetDestination) && downloadId.StartsWith("artist_"))
+            {
+                var matchedArtist = ArtistStore.GetAll().FirstOrDefault(a =>
+                    a.RecentSongs.Any(s => downloadId.Contains(s.VideoId) || s.Url == url));
+                if (matchedArtist != null)
+                {
+                    targetDestination = !string.IsNullOrWhiteSpace(matchedArtist.DownloadFolder)
+                        ? matchedArtist.DownloadFolder
+                        : PathUtils.GetArtistDirectory(matchedArtist.Name);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(targetDestination))
+            {
+                targetDestination = SettingsStore.Current.CustomSavePath;
             }
 
             var ctx = new DownloadContext
@@ -70,7 +106,7 @@ namespace SsshmulDownloader.Engine
                 CustomTitle = customTitle,
                 CustomThumbnail = customThumbnail,
                 FormatId = formatId,
-                DestinationPath = !string.IsNullOrWhiteSpace(destinationPath) ? destinationPath : SettingsStore.Current.CustomSavePath,
+                DestinationPath = targetDestination,
                 IsNetfree = isNetfree,
                 IsVideo = isVideo,
                 PlaylistTitle = playlistTitle,

@@ -27,16 +27,17 @@ def main():
             action = msg.get("action", "")
             
             if action in ["start_server", "launch_app"]:
-                root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+                local_app_data = os.environ.get("LOCALAPPDATA", "")
                 candidate_paths = [
                     os.path.join(root_dir, "Run-App.bat"),
                     os.path.join(root_dir, "SsshmulDownloader", "bin", "Release", "net8.0-windows", "SsshmulDownloader.exe"),
                     os.path.join(root_dir, "SsshmulDownloader", "bin", "Debug", "net8.0-windows", "SsshmulDownloader.exe"),
                     os.path.join(root_dir, "SsshmulDownloader.exe"),
-                    r"C:\Program Files\Ssshmul Downloader\SsshmulDownloader.exe",
-                    r"C:\Program Files\Ssshmul Downloader\Ssshmul Downloader.exe",
-                    r"C:\Users\SHMUEL\AppData\Local\SsshmulDownloader\SsshmulDownloader.exe",
-                    r"C:\Users\SHMUEL\AppData\Local\SsshmulDownloader\Ssshmul Downloader.exe"
+                    os.path.join(prog_files, "Ssshmul Downloader", "SsshmulDownloader.exe"),
+                    os.path.join(prog_files, "Ssshmul Downloader", "Ssshmul Downloader.exe"),
+                    os.path.join(local_app_data, "SsshmulDownloader", "SsshmulDownloader.exe"),
+                    os.path.join(local_app_data, "SsshmulDownloader", "Ssshmul Downloader.exe")
                 ]
                 target_exe = next((p for p in candidate_paths if os.path.exists(p)), None)
                 

@@ -67,14 +67,82 @@ namespace SsshmulDownloader.Server
             }
         }
 
+        private static bool IsOriginAllowed(string? origin)
+        {
+            if (string.IsNullOrEmpty(origin)) return true; // Direct desktop / WebView2 internal requests
+
+            if (origin.Equals($"http://localhost:{Port}", StringComparison.OrdinalIgnoreCase) ||
+                origin.Equals($"http://127.0.0.1:{Port}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (origin.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("moz-extension://", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("edge-extension://", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsAllowedImageDirectory(string fullPath)
+        {
+            var allowedDirectories = new List<string>
+            {
+                Path.GetFullPath(PathUtils.GetAppDataDirectory()),
+                Path.GetFullPath(PathUtils.GetWebDirectory()),
+                Path.GetFullPath(PathUtils.GetDefaultMusicDirectory()),
+                Path.GetFullPath(PathUtils.GetActiveArtistTrackerDirectory()),
+                Path.GetFullPath(Path.GetTempPath()),
+                Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
+            };
+
+            if (!string.IsNullOrWhiteSpace(SettingsStore.Current.CustomSavePath) && Directory.Exists(SettingsStore.Current.CustomSavePath))
+            {
+                allowedDirectories.Add(Path.GetFullPath(SettingsStore.Current.CustomSavePath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(SettingsStore.Current.ArtistTrackerSavePath) && Directory.Exists(SettingsStore.Current.ArtistTrackerSavePath))
+            {
+                allowedDirectories.Add(Path.GetFullPath(SettingsStore.Current.ArtistTrackerSavePath));
+            }
+
+            foreach (var dir in allowedDirectories)
+            {
+                string dirWithSlash = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (fullPath.StartsWith(dirWithSlash, StringComparison.OrdinalIgnoreCase) || fullPath.Equals(dir, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private async Task HandleRequestAsync(HttpListenerContext ctx)
         {
             try
             {
-                // Always set CORS headers
-                ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
-                ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-                ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, Authorization";
+                string? origin = ctx.Request.Headers["Origin"];
+
+                // Validate origin to protect against Cross-Site WebSocket Hijacking and cross-origin attacks
+                if (!IsOriginAllowed(origin))
+                {
+                    ctx.Response.StatusCode = 403;
+                    ctx.Response.Close();
+                    return;
+                }
+
+                // Set secure CORS headers only for allowed origins
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    ctx.Response.Headers["Access-Control-Allow-Origin"] = origin;
+                    ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+                    ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, Authorization";
+                    ctx.Response.Headers["Vary"] = "Origin";
+                }
 
                 if (ctx.Request.HttpMethod == "OPTIONS")
                 {
@@ -114,14 +182,25 @@ namespace SsshmulDownloader.Server
                 if (path.Equals("/local-image", StringComparison.OrdinalIgnoreCase))
                 {
                     string? imagePath = ctx.Request.QueryString["path"];
-                    if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    if (!string.IsNullOrWhiteSpace(imagePath))
                     {
-                        ctx.Response.ContentType = GetMimeType(imagePath);
-                        ctx.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-                        using var fs = File.OpenRead(imagePath);
-                        await fs.CopyToAsync(ctx.Response.OutputStream);
-                        ctx.Response.Close();
-                        return;
+                        try
+                        {
+                            string fullImagePath = Path.GetFullPath(imagePath);
+                            string ext = Path.GetExtension(fullImagePath).ToLowerInvariant();
+                            bool isImageExt = ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".ico" or ".bmp" or ".svg";
+
+                            if (isImageExt && IsAllowedImageDirectory(fullImagePath) && File.Exists(fullImagePath))
+                            {
+                                ctx.Response.ContentType = GetMimeType(fullImagePath);
+                                ctx.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                                using var fs = File.OpenRead(fullImagePath);
+                                await fs.CopyToAsync(ctx.Response.OutputStream);
+                                ctx.Response.Close();
+                                return;
+                            }
+                        }
+                        catch { }
                     }
 
                     ctx.Response.StatusCode = 404;
@@ -129,23 +208,27 @@ namespace SsshmulDownloader.Server
                     return;
                 }
 
-                // 4. Static web assets
-                string webDir = PathUtils.GetWebDirectory();
+                // 4. Static web assets with directory traversal protection
+                string webDir = Path.GetFullPath(PathUtils.GetWebDirectory());
+                string webDirWithSlash = webDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 string relativePath = path.TrimStart('/');
-                if (string.IsNullOrEmpty(relativePath) || relativePath == "index.html")
+                if (string.IsNullOrEmpty(relativePath) || relativePath.Equals("index.html", StringComparison.OrdinalIgnoreCase))
                 {
                     relativePath = "index.html";
                 }
 
-                string localFile = Path.Combine(webDir, relativePath);
-                if (File.Exists(localFile))
+                string localFile = Path.GetFullPath(Path.Combine(webDir, relativePath));
+                if (localFile.StartsWith(webDirWithSlash, StringComparison.OrdinalIgnoreCase) || localFile.Equals(webDir, StringComparison.OrdinalIgnoreCase))
                 {
-                    ctx.Response.ContentType = GetMimeType(localFile);
-                    ctx.Response.StatusCode = 200;
-                    using var fs = File.OpenRead(localFile);
-                    await fs.CopyToAsync(ctx.Response.OutputStream);
-                    ctx.Response.Close();
-                    return;
+                    if (File.Exists(localFile))
+                    {
+                        ctx.Response.ContentType = GetMimeType(localFile);
+                        ctx.Response.StatusCode = 200;
+                        using var fs = File.OpenRead(localFile);
+                        await fs.CopyToAsync(ctx.Response.OutputStream);
+                        ctx.Response.Close();
+                        return;
+                    }
                 }
 
                 ctx.Response.StatusCode = 404;

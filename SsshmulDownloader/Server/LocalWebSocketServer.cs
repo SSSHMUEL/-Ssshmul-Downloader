@@ -51,6 +51,17 @@ namespace SsshmulDownloader.Server
                 };
                 await SendDirectAsync(ws, artistsMsg);
 
+                // If an update is available, inform the newly connected client
+                if (UpdateManager.LastDiscoveredUpdate != null && UpdateManager.LastDiscoveredUpdate.HasUpdate)
+                {
+                    var updateMsg = new DownloadMessage("update_status")
+                    {
+                        UpdateInfo = UpdateManager.LastDiscoveredUpdate,
+                        CurrentVersion = UpdateManager.GetCurrentVersion()
+                    };
+                    await SendDirectAsync(ws, updateMsg);
+                }
+
                 var buffer = new byte[8192];
                 var ms = new MemoryStream();
 
@@ -195,6 +206,11 @@ namespace SsshmulDownloader.Server
                             if (!string.IsNullOrEmpty(selectedPath))
                             {
                                 SettingsStore.Update(s => s.ArtistTrackerSavePath = selectedPath);
+                                ArtistScanner.StartDirectoryWatcher();
+                                _ = Task.Run(async () =>
+                                {
+                                    await ArtistScanner.SyncArtistsFromTargetDirectoryAsync(selectedPath, triggerScan: false);
+                                });
                                 _ = BroadcastAsync(new DownloadMessage("artist_tracker_destination_selected") { Path = selectedPath });
                             }
                         });
@@ -205,7 +221,27 @@ namespace SsshmulDownloader.Server
                         {
                             string? p = atpProp.GetString();
                             SettingsStore.Update(s => s.ArtistTrackerSavePath = string.IsNullOrWhiteSpace(p) ? null : p);
+                            ArtistScanner.StartDirectoryWatcher();
+                            _ = Task.Run(async () =>
+                            {
+                                await ArtistScanner.SyncArtistsFromTargetDirectoryAsync(p, triggerScan: false);
+                            });
                         }
+                        break;
+
+                    case "sync_artist_folders":
+                        _ = Task.Run(async () =>
+                        {
+                            await BroadcastAsync(new DownloadMessage("scan_progress")
+                            {
+                                Message = "מסנכרן תיקיות אמנים מתיקיית היעד..."
+                            });
+                            int synced = await ArtistScanner.SyncArtistsFromTargetDirectoryAsync(triggerScan: true);
+                            await BroadcastAsync(new DownloadMessage("scan_all_completed")
+                            {
+                                Message = $"סנכרון תיקיות הושלם ({synced} אמנים עודכנו/נוספו)."
+                            });
+                        });
                         break;
 
                     case "set_save_path":
@@ -277,7 +313,7 @@ namespace SsshmulDownloader.Server
                         if (root.TryGetProperty("downloadUrl", out var dlUrlProp))
                         {
                             string? dlUrl = dlUrlProp.GetString();
-                            if (!string.IsNullOrWhiteSpace(dlUrl))
+                            if (!string.IsNullOrWhiteSpace(dlUrl) && UpdateManager.IsValidDownloadUrl(dlUrl))
                             {
                                 _ = Task.Run(async () =>
                                 {
@@ -297,6 +333,10 @@ namespace SsshmulDownloader.Server
                                     }
                                 });
                             }
+                            else
+                            {
+                                await BroadcastAsync(DownloadMessage.CreateError("כתובת ההורדה של העדכון אינה מורשית או אינה תקינה."));
+                            }
                         }
                         break;
 
@@ -304,9 +344,17 @@ namespace SsshmulDownloader.Server
                         if (root.TryGetProperty("path", out var pathProp))
                         {
                             string? folderPath = pathProp.GetString();
-                            if (!string.IsNullOrEmpty(folderPath) && Directory.Exists(folderPath))
+                            if (!string.IsNullOrEmpty(folderPath))
                             {
-                                Process.Start("explorer.exe", folderPath);
+                                try
+                                {
+                                    string fullFolderPath = Path.GetFullPath(folderPath);
+                                    if (Directory.Exists(fullFolderPath))
+                                    {
+                                        Process.Start("explorer.exe", $"\"{fullFolderPath}\"");
+                                    }
+                                }
+                                catch { }
                             }
                         }
                         break;

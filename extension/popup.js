@@ -290,7 +290,7 @@ function selectFormatAndQuality(formatType, qualityFormat, showFeedback = true) 
 function startServer() {
     // showToast('🚀 מפעיל את שרת Ssshmul Downloader ברקע...');
     try {
-        chrome.runtime.sendNativeMessage('com.nfdownloader.host', { action: 'start_server' }, (resp) => {
+        chrome.runtime.sendNativeMessage('com.ssshmuldownloader.host', { action: 'start_server' }, (resp) => {
             if (chrome.runtime.lastError) {
                 // Fallback to custom protocol
                 const ifr = document.createElement('iframe');
@@ -328,7 +328,7 @@ function stopServer() {
 
     // 3. Send via Native Messaging Host
     try {
-        chrome.runtime.sendNativeMessage('com.nfdownloader.host', { action: 'stop_server' }, () => {
+        chrome.runtime.sendNativeMessage('com.ssshmuldownloader.host', { action: 'stop_server' }, () => {
             if (chrome.runtime.lastError) {}
         });
     } catch (e) {}
@@ -588,8 +588,11 @@ function handleServerMessage(data) {
         } else {
             if (statusDesc) statusDesc.textContent = 'התוכנה מעודכנת לגרסה האחרונה ✔️';
             if (actionContainer) actionContainer.classList.add('hidden');
-            showToast('התוכנה מעודכנת לגרסה העדכנית ביותר');
+            if (window._isManualUpdateCheck) {
+                showToast('התוכנה מעודכנת לגרסה העדכנית ביותר');
+            }
         }
+        window._isManualUpdateCheck = false;
         return;
     }
 
@@ -1315,14 +1318,25 @@ async function downloadSingleVideo(videoId) {
     proceedSingleDownload(video);
 }
 
-function cleanSongQuery(title) {
+function cleanSongTitle(title) {
     if (!title) return '';
     let cleaned = title;
+    // Remove " - YouTube" or similar site suffixes
     cleaned = cleaned.replace(/\s*-\s*YouTube$/i, '');
-    cleaned = cleaned.replace(/[([{\-]\s*(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|מילים|אודיו|גרסת\s*אולפן)\s*[)\]}]/gi, '');
-    cleaned = cleaned.replace(/(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי)\b/gi, '');
+    // Remove common video-only tags, parentheses, and brackets (repeat to handle adjacent brackets like (Lyric Video) (Official))
+    for (let i = 0; i < 2; i++) {
+        cleaned = cleaned.replace(/\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\]/gi, '');
+        cleaned = cleaned.replace(/\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\)/gi, '');
+        cleaned = cleaned.replace(/\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\}/gi, '');
+    }
+    cleaned = cleaned.replace(/\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b/gi, '');
+    // Clean redundant extra spaces and trailing dashes
     cleaned = cleaned.replace(/[\s\-_|:]+$/g, '').replace(/^[\s\-_|:]+/g, '').replace(/\s{2,}/g, ' ').trim();
-    return cleaned;
+    return cleaned || title;
+}
+
+function cleanSongQuery(title) {
+    return cleanSongTitle(title);
 }
 
 async function findCleanAudioVersion(url, currentTitle, originalChannel = '') {
@@ -1771,16 +1785,14 @@ async function proceedSingleDownload(video) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-        fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
-    }
+    const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
 
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: finalUrl,
         directUrl: null,
-        customTitle: finalTitle,
+        customTitle: effectiveTitle,
         customThumbnail: finalThumbnail,
         customSavePath: storage.customSavePath || null,
         formatId: selectedQuality,
@@ -1795,7 +1807,7 @@ async function proceedSingleDownload(video) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: finalTitle,
+        title: effectiveTitle,
         thumbnail: finalThumbnail,
         percent: '0',
         speed: ''
@@ -2643,8 +2655,10 @@ async function proceedDownloadAll() {
         const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
         const selectedQuality = isVideo ? selectedMp4Quality : selectedMp3Quality;
 
+        const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
+
         if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-            fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
+            fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, effectiveTitle);
         }
 
         const msg = {
@@ -2652,7 +2666,7 @@ async function proceedDownloadAll() {
             downloadId: downloadId,
             url: finalUrl,
             directUrl: null,
-            customTitle: finalTitle,
+            customTitle: effectiveTitle,
             customThumbnail: finalThumbnail,
             customSavePath: storage.customSavePath || null,
             formatId: selectedQuality,
@@ -2667,7 +2681,7 @@ async function proceedDownloadAll() {
 
         activeDownloads[downloadId] = {
             id: downloadId,
-            title: finalTitle,
+            title: effectiveTitle,
             thumbnail: finalThumbnail,
             percent: '0',
             speed: ''
@@ -2745,8 +2759,10 @@ async function proceedDownload(url) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
+    const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
+
     if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-        fetchAndDownloadSubtitlesFromUrl(finalUrl, finalTitle);
+        fetchAndDownloadSubtitlesFromUrl(finalUrl, effectiveTitle);
     }
 
     const msg = {
@@ -2754,7 +2770,7 @@ async function proceedDownload(url) {
         downloadId: downloadId,
         url: finalUrl,
         directUrl: null,
-        customTitle: finalTitle,
+        customTitle: effectiveTitle,
         customThumbnail: finalThumbnail,
         customSavePath: storage.customSavePath || null,
         formatId: selectedQuality,
@@ -2769,7 +2785,7 @@ async function proceedDownload(url) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: finalTitle || 'מוריד...',
+        title: effectiveTitle || 'מוריד...',
         thumbnail: finalThumbnail || 'icon.png',
         percent: '0',
         speed: ''
@@ -3492,6 +3508,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const syncArtistFoldersBtn = document.getElementById('sync-artist-folders-btn');
+    if (syncArtistFoldersBtn) {
+        syncArtistFoldersBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'sync_artist_folders' }));
+                showToast('מסנכרן תיקיות אמנים מתיקיית היעד...');
+            }
+        });
+    }
+
     // Artist scan interval chips
     const intervalChips = document.querySelectorAll('#artist-scan-interval-chips .chip');
     intervalChips.forEach(chip => {
@@ -4122,12 +4148,14 @@ async function downloadArtistSong(song, artist) {
     const cookies = storage.savedCookies || null;
     const destFolder = artist.downloadFolder || storage.artistTrackerSavePath || null;
 
+    const effectiveTitle = (!isVideo && song.title) ? cleanSongTitle(song.title) : song.title;
+
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: songUrl,
         directUrl: null,
-        customTitle: song.title,
+        customTitle: effectiveTitle,
         customThumbnail: song.thumbnail,
         customSavePath: destFolder,
         formatId: selectedFormat,
@@ -4140,7 +4168,7 @@ async function downloadArtistSong(song, artist) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: song.title,
+        title: effectiveTitle,
         thumbnail: song.thumbnail,
         percent: '0',
         speed: '',
@@ -4339,11 +4367,13 @@ if (checkUpdatesBtn) {
     checkUpdatesBtn.addEventListener('click', () => {
         checkUpdatesBtn.disabled = true;
         checkUpdatesBtn.innerHTML = '<span>⏳ בודק...</span>';
+        window._isManualUpdateCheck = true;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'check_for_updates' }));
         } else {
             checkUpdatesBtn.disabled = false;
             checkUpdatesBtn.innerHTML = '<span>🔍 בדוק עדכונים</span>';
+            window._isManualUpdateCheck = false;
             showToast('השרת אינו מחובר כעת');
         }
     });

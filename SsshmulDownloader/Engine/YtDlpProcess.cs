@@ -41,14 +41,13 @@ namespace SsshmulDownloader.Engine
             string tempOutputDir,
             string? cookiesFile,
             SubsOptions? subs,
-            TagMappings? tagMappings)
+            TagMappings? tagMappings,
+            bool isNetfree = false)
         {
             var args = new List<string>
             {
                 "--verbose",
                 "--encoding", "utf-8",
-                "--no-check-certificates",
-                "--prefer-insecure",
                 "--force-ipv4",
                 "--progress",
                 "--socket-timeout", "15",
@@ -58,6 +57,12 @@ namespace SsshmulDownloader.Engine
                 "--convert-thumbnails", "jpg",
                 "--extractor-args", "youtube:player_client=ios,android,web_creator"
             };
+
+            if (isNetfree)
+            {
+                args.Add("--no-check-certificates");
+                args.Add("--prefer-insecure");
+            }
 
             if (!string.IsNullOrEmpty(cookiesFile) && File.Exists(cookiesFile))
             {
@@ -71,12 +76,6 @@ namespace SsshmulDownloader.Engine
                 {
                     args.Add("--cookies");
                     args.Add(savedCookies);
-                }
-                else
-                {
-                    // Automatic browser extraction fallback
-                    args.Add("--cookies-from-browser");
-                    args.Add("chrome");
                 }
             }
 
@@ -97,10 +96,15 @@ namespace SsshmulDownloader.Engine
             args.Add("--print");
             args.Add("before_dl:MPS_METADATA:%(title)s|%(thumbnail)s");
 
+            bool isAudio = formatId == null || formatId.StartsWith("mp3") || formatId == "raw_audio" || formatId == "generic_audio";
+
             string outputTemplate = "%(title)s.%(ext)s";
             if (!string.IsNullOrWhiteSpace(customTitle))
             {
-                string safeTitle = Regex.Replace(customTitle, @"[\\/:*?""<>|]", "_");
+                string effectiveTitle = isAudio
+                    ? SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanSongTitle(customTitle)
+                    : customTitle;
+                string safeTitle = Regex.Replace(effectiveTitle, @"[\\/:*?""<>|]", "_");
                 outputTemplate = safeTitle + ".%(ext)s";
             }
 
@@ -110,8 +114,6 @@ namespace SsshmulDownloader.Engine
             args.Add("--output");
             args.Add(isPlaylist ? "%(playlist)s/%(playlist_index)s - " + outputTemplate : outputTemplate);
             args.Add(isPlaylist ? "--yes-playlist" : "--no-playlist");
-
-            bool isAudio = formatId == null || formatId.StartsWith("mp3") || formatId == "raw_audio" || formatId == "generic_audio";
 
             // Subtitle extraction flags
             if (subs != null && !string.IsNullOrWhiteSpace(subs.Lang))
@@ -128,6 +130,9 @@ namespace SsshmulDownloader.Engine
                 args.Add("--convert-subs");
                 args.Add("srt");
                 args.Add("--no-abort-on-error");
+                args.Add("--ignore-no-formats-error");
+                args.Add("--extractor-args");
+                args.Add("youtube:player_client=android,ios,web_creator");
 
                 if (subs.Type == "embed" && !isAudio)
                 {
@@ -217,8 +222,13 @@ namespace SsshmulDownloader.Engine
             args.Add("--postprocessor-args"); args.Add("VideoConvertor:-preset ultrafast -threads 0");
             args.Add("--postprocessor-args"); args.Add("VideoRemuxer:-preset ultrafast -threads 0");
 
-            // Target URL
-            args.Add(!string.IsNullOrWhiteSpace(directUrl) ? directUrl : url);
+            // Target URL - use "--" delimiter to prevent argument injection
+            string target = !string.IsNullOrWhiteSpace(directUrl) ? directUrl : url;
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                args.Add("--");
+                args.Add(target.Trim());
+            }
 
             return args;
         }
@@ -275,7 +285,8 @@ namespace SsshmulDownloader.Engine
                 tempDir,
                 cookiesFile,
                 ctx.Subs,
-                ctx.TagMappings);
+                ctx.TagMappings,
+                ctx.IsNetfree);
 
             var psi = new ProcessStartInfo
             {
@@ -401,7 +412,25 @@ namespace SsshmulDownloader.Engine
                     return new DownloadResult(false, "Cancelled");
                 }
 
-                if (process.ExitCode == 0)
+                // Check if any media files were successfully downloaded into tempDir
+                var downloadedMediaFiles = Directory.Exists(tempDir)
+                    ? Directory.GetFiles(tempDir)
+                        .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                    !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                    !Path.GetFileName(f).Equals("cookies.txt", StringComparison.OrdinalIgnoreCase) &&
+                                    !Path.GetFileName(f).StartsWith("meta_", StringComparison.OrdinalIgnoreCase))
+                        .ToList()
+                    : new List<string>();
+
+                bool hasMedia = downloadedMediaFiles.Any(f =>
+                {
+                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    return ext == ".mp4" || ext == ".mkv" || ext == ".webm" || ext == ".avi" ||
+                           ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" ||
+                           ext == ".opus" || ext == ".ogg" || ext == ".aac";
+                });
+
+                if (process.ExitCode == 0 || hasMedia)
                 {
                     // Move downloaded files to target directory
                     string targetFolder = !string.IsNullOrWhiteSpace(ctx.DestinationPath)
@@ -434,11 +463,11 @@ namespace SsshmulDownloader.Engine
                         catch { }
                     }
 
-                    string finalPath = MoveFilesSafely(tempDir, targetFolder, isEmbedSubs);
+                    string finalPath = MoveFilesSafely(tempDir, targetFolder, isEmbedSubs, !isVideo);
                     try
                     {
                         string logFile = PathUtils.GetLogFilePath();
-                        File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [yt-dlp] SUCCESS: Saved to: {finalPath}\n");
+                        File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [yt-dlp] SUCCESS: Saved to: {finalPath} (ExitCode: {process.ExitCode})\n");
                     }
                     catch { }
                     return new DownloadResult(true, null, finalPath);
@@ -448,7 +477,7 @@ namespace SsshmulDownloader.Engine
                     string fullErr = errorOutput.ToString().Trim();
                     string err = fullErr;
 
-                    if (isNetfreeBlocked)
+                    if (isNetfreeBlocked || fullErr.Contains("Blocked by NetFree", StringComparison.OrdinalIgnoreCase) || fullErr.Contains("HTTP Error 418", StringComparison.OrdinalIgnoreCase))
                     {
                         err = "נחסם על ידי נטפרי (HTTP 418)";
                     }
@@ -467,6 +496,37 @@ namespace SsshmulDownloader.Engine
                     {
                         err = "יוטיוב דורש אימות: פתח את תוסף הדפדפן, היכנס להגדרות ⚙️ ולחץ 'רענן עוגיות מהדפדפן' (ודא שאתה מחובר ליוטיוב בדפדפן).";
                     }
+                    else if (fullErr.Contains("HTTP Error 429", StringComparison.OrdinalIgnoreCase) || fullErr.Contains("Too Many Requests", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (fullErr.Contains("subtitles", StringComparison.OrdinalIgnoreCase))
+                        {
+                            err = "הורדת הכתוביות נחסמה עקב עומס בקשות מיוטיוב (429 Too Many Requests).";
+                        }
+                        else
+                        {
+                            err = "יוטיוב חסם זמנית את הבקשות עקב עומס (שגיאה 429). מומלץ לרענן עוגיות בהגדרות או להמתין מספר דקות.";
+                        }
+                    }
+                    else if (fullErr.Contains("Video unavailable", StringComparison.OrdinalIgnoreCase) || fullErr.Contains("Private video", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "הסרטון אינו זמין או שהוגדר כפרטי.";
+                    }
+                    else if (fullErr.Contains("Members-only content", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "התוכן זמין לחברי מועדון הערוץ בלבד.";
+                    }
+                    else if (fullErr.Contains("This video has been removed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "סרטון זה הוסר מיוטיוב.";
+                    }
+                    else if (fullErr.Contains("Premieres in", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "סרטון זה טרם שודר (שידור בכורה עתידי).";
+                    }
+                    else if (fullErr.Contains("Incomplete YouTube ID", StringComparison.OrdinalIgnoreCase) || fullErr.Contains("is not a valid URL", StringComparison.OrdinalIgnoreCase))
+                    {
+                        err = "כתובת הקישור שהוזנה אינה תקינה.";
+                    }
                     else
                     {
                         // Extract lines with ERROR: first if available, so harmless WARNINGs don't hide the real cause
@@ -474,7 +534,15 @@ namespace SsshmulDownloader.Engine
                         var actualErrors = errLines.Where(l => l.Contains("ERROR:", StringComparison.OrdinalIgnoreCase)).ToList();
                         if (actualErrors.Count > 0)
                         {
-                            err = string.Join("\n", actualErrors);
+                            string firstErr = actualErrors[0].Replace("ERROR:", "").Trim();
+                            if (firstErr.Contains("HTTP Error 429", StringComparison.OrdinalIgnoreCase))
+                            {
+                                err = "יוטיוב חסם זמנית את ההורדה עקב עומס בקשות (HTTP 429). נסה שוב בעוד מספר דקות.";
+                            }
+                            else
+                            {
+                                err = $"שגיאה בהורדה: {firstErr}";
+                            }
                         }
                     }
 
@@ -512,7 +580,7 @@ namespace SsshmulDownloader.Engine
             }
         }
 
-        public static string MoveFilesSafely(string sourceDir, string targetDir, bool isEmbedSubs = false)
+        public static string MoveFilesSafely(string sourceDir, string targetDir, bool isEmbedSubs = false, bool isAudio = false)
         {
             if (!Directory.Exists(targetDir))
             {
@@ -522,19 +590,143 @@ namespace SsshmulDownloader.Engine
             string primaryFile = targetDir;
             if (Directory.Exists(sourceDir))
             {
+                var allFiles = Directory.GetFiles(sourceDir).ToList();
+
+                // If not embedding subs, handle subtitle deduplication first
+                // e.g. if we have both .iw-orig.srt and .iw.srt, or .he-orig.srt and .he.srt, keep only one
+                var srtAndVtt = allFiles.Where(f =>
+                {
+                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    return ext == ".srt" || ext == ".vtt" || ext == ".ass" || ext == ".sub";
+                }).ToList();
+
+                // If both Hebrew and English subtitles exist (e.g. he/iw and en), merge them into a single bilingual SRT
+                if (!isEmbedSubs || isAudio)
+                {
+                    TryMergeBilingualSubtitles(sourceDir);
+                    // Refresh file list after potential merge
+                    allFiles = Directory.GetFiles(sourceDir).ToList();
+                    srtAndVtt = allFiles.Where(f =>
+                    {
+                        string ext = Path.GetExtension(f).ToLowerInvariant();
+                        return ext == ".srt" || ext == ".vtt" || ext == ".ass" || ext == ".sub";
+                    }).ToList();
+                }
+
+                if (isEmbedSubs)
+                {
+                    foreach (var sub in srtAndVtt)
+                    {
+                        try { File.Delete(sub); } catch { }
+                        allFiles.Remove(sub);
+                    }
+                }
+                else if (srtAndVtt.Count > 1)
+                {
+                    // Group by language (e.g. iw vs en) and pick best one per group
+                    // Prefer non-orig or orig if only one, discard the duplicate
+                    var duplicateToRemove = new List<string>();
+                    var origSubs = srtAndVtt.Where(f => f.Contains("-orig.", StringComparison.OrdinalIgnoreCase)).ToList();
+                    foreach (var orig in origSubs)
+                    {
+                        string nonOrigName = orig.Replace("-orig.", ".");
+                        if (srtAndVtt.Any(f => string.Equals(f, nonOrigName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            duplicateToRemove.Add(orig);
+                        }
+                    }
+
+                    foreach (var rem in duplicateToRemove)
+                    {
+                        try { File.Delete(rem); } catch { }
+                        allFiles.Remove(rem);
+                        srtAndVtt.Remove(rem);
+                    }
+                }
+
+                // First find the primary media file name so subtitle can cleanly match it
+                string? baseMediaCleanName = null;
+                var mediaFile = allFiles.FirstOrDefault(f =>
+                {
+                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    return ext == ".mp4" || ext == ".mkv" || ext == ".webm" || ext == ".avi" ||
+                           ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" ||
+                           ext == ".opus" || ext == ".ogg" || ext == ".aac";
+                });
+
+                if (mediaFile != null)
+                {
+                    string rawName = Path.GetFileNameWithoutExtension(mediaFile);
+                    if (isAudio)
+                    {
+                        string cleaned = SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanSongTitle(rawName);
+                        baseMediaCleanName = !string.IsNullOrWhiteSpace(cleaned) ? cleaned : rawName;
+                    }
+                    else
+                    {
+                        baseMediaCleanName = rawName;
+                    }
+                }
+
                 foreach (string file in Directory.GetFiles(sourceDir))
                 {
-                    string fileName = Path.GetFileName(file);
+                    string sourceFilePath = file;
+                    string fileName = Path.GetFileName(sourceFilePath);
                     if (fileName.Equals("cookies.txt", StringComparison.OrdinalIgnoreCase)) continue;
 
                     string ext = Path.GetExtension(fileName).ToLowerInvariant();
-                    if (isEmbedSubs && (ext == ".srt" || ext == ".vtt" || ext == ".ass" || ext == ".sub"))
+                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+
+                    bool isSubFile = ext == ".srt" || ext == ".vtt" || ext == ".ass" || ext == ".sub";
+                    if (isSubFile)
                     {
-                        continue; // Intermediate subtitle file already embedded into video by ffmpeg
+                        // Clean subtitle name: remove trailing .iw, .he, .iw-orig, .en etc.
+                        string cleanSubName = Regex.Replace(nameWithoutExt, @"\.(iw|he|en|iw-orig|he-orig|en-orig)$", "", RegexOptions.IgnoreCase);
+                        if (!string.IsNullOrWhiteSpace(baseMediaCleanName))
+                        {
+                            // If there is only 1 subtitle file, name it exactly as the media file: "Title.ext"
+                            // If multiple languages (e.g. English and Hebrew), keep language tag: "Title.he.ext"
+                            if (srtAndVtt.Count == 1)
+                            {
+                                nameWithoutExt = baseMediaCleanName;
+                            }
+                            else
+                            {
+                                var matchLang = Regex.Match(nameWithoutExt, @"\.(iw|he|en|iw-orig|he-orig|en-orig)$", RegexOptions.IgnoreCase);
+                                string langTag = matchLang.Success ? matchLang.Value : "";
+                                nameWithoutExt = baseMediaCleanName + langTag;
+                            }
+                        }
+                        else
+                        {
+                            nameWithoutExt = cleanSubName;
+                        }
+
+                        // For audio downloads, save as .lrc (synchronized lyrics) instead of .srt
+                        if (isAudio)
+                        {
+                            ext = ".lrc";
+                            try
+                            {
+                                string originalSubContent = File.ReadAllText(sourceFilePath, Encoding.UTF8);
+                                string lrcContent = ConvertSrtToLrc(originalSubContent);
+                                string lrcTempFile = Path.ChangeExtension(sourceFilePath, ".lrc");
+                                File.WriteAllText(lrcTempFile, lrcContent, new UTF8Encoding(false));
+                                try { File.Delete(sourceFilePath); } catch { }
+                                sourceFilePath = lrcTempFile;
+                            }
+                            catch { }
+                        }
+                    }
+                    else if (isAudio && (ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" || ext == ".opus" || ext == ".ogg" || ext == ".aac"))
+                    {
+                        if (!string.IsNullOrWhiteSpace(baseMediaCleanName))
+                        {
+                            nameWithoutExt = baseMediaCleanName;
+                        }
                     }
 
-                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                    string targetPath = Path.Combine(targetDir, fileName);
+                    string targetPath = Path.Combine(targetDir, nameWithoutExt + ext);
 
                     int counter = 1;
                     while (File.Exists(targetPath))
@@ -545,14 +737,30 @@ namespace SsshmulDownloader.Engine
 
                     try
                     {
-                        File.Move(file, targetPath, overwrite: true);
+                        File.Move(sourceFilePath, targetPath, overwrite: true);
                         if (!targetPath.EndsWith(".srt", StringComparison.OrdinalIgnoreCase) &&
-                            !targetPath.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase))
+                            !targetPath.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) &&
+                            !targetPath.EndsWith(".lrc", StringComparison.OrdinalIgnoreCase))
                         {
                             primaryFile = targetPath;
                         }
+
+                        try
+                        {
+                            string logFile = PathUtils.GetLogFilePath();
+                            File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [MoveFiles] Moved: {fileName} -> {Path.GetFileName(targetPath)}\n");
+                        }
+                        catch { }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        try
+                        {
+                            string logFile = PathUtils.GetLogFilePath();
+                            File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [MoveFiles] ERROR moving {fileName}: {ex.Message}\n");
+                        }
+                        catch { }
+                    }
                 }
 
                 try
@@ -864,6 +1072,7 @@ namespace SsshmulDownloader.Engine
                 }
             }
 
+            psi.ArgumentList.Add("--");
             psi.ArgumentList.Add(searchTarget);
 
             string ytdlpDir = Path.GetDirectoryName(ytdlpPath) ?? "";
@@ -965,6 +1174,251 @@ namespace SsshmulDownloader.Engine
             }
 
             return results;
+        }
+
+        private class SrtEntry
+        {
+            public TimeSpan Start { get; set; }
+            public TimeSpan End { get; set; }
+            public string Text { get; set; } = string.Empty;
+        }
+
+        private static List<SrtEntry> ParseSrtContent(string content)
+        {
+            var entries = new List<SrtEntry>();
+            var blocks = Regex.Split(content.Trim(), @"(?:\r?\n){2,}");
+            foreach (var block in blocks)
+            {
+                var lines = block.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                if (lines.Length < 2) continue;
+
+                int timeIdx = -1;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].Contains("-->"))
+                    {
+                        timeIdx = i;
+                        break;
+                    }
+                }
+                if (timeIdx == -1) continue;
+
+                var timeMatch = Regex.Match(lines[timeIdx], @"(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})");
+                if (!timeMatch.Success) continue;
+
+                if (!TimeSpan.TryParse(timeMatch.Groups[1].Value.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out var startTs)) continue;
+                if (!TimeSpan.TryParse(timeMatch.Groups[2].Value.Replace(',', '.'), System.Globalization.CultureInfo.InvariantCulture, out var endTs)) continue;
+
+                var textLines = lines.Skip(timeIdx + 1).Select(l => Regex.Replace(l, @"<[^>]+>", "").Trim()).Where(l => !string.IsNullOrWhiteSpace(l));
+                string text = string.Join("\n", textLines).Trim();
+                if (string.IsNullOrWhiteSpace(text)) continue;
+
+                entries.Add(new SrtEntry { Start = startTs, End = endTs, Text = text });
+            }
+            return entries;
+        }
+
+        private static void TryMergeBilingualSubtitles(string dir)
+        {
+            try
+            {
+                var srtFiles = Directory.GetFiles(dir, "*.srt");
+                if (srtFiles.Length < 2) return;
+
+                // Identify Hebrew file (iw or he) and English file (en)
+                // Supports yt-dlp generated names like .en.srt, .en-en-nP7.srt, .iw-en-nP7.srt, etc.
+                string? heFile = srtFiles.FirstOrDefault(f =>
+                {
+                    string name = Path.GetFileName(f).ToLowerInvariant();
+                    return Regex.IsMatch(name, @"\b(iw|he)\b|\.(iw|he)(-[a-z0-9]+)*\.srt$");
+                });
+
+                string? enFile = srtFiles.FirstOrDefault(f =>
+                {
+                    string name = Path.GetFileName(f).ToLowerInvariant();
+                    return f != heFile && (Regex.IsMatch(name, @"\ben\b|\.en(-[a-z0-9]+)*\.srt$") && !name.StartsWith("iw-") && !name.Contains(".iw-"));
+                });
+
+                if (heFile == null || enFile == null || heFile == enFile) return;
+
+                string heText = File.ReadAllText(heFile, Encoding.UTF8);
+                string enText = File.ReadAllText(enFile, Encoding.UTF8);
+
+                var heEntries = ParseSrtContent(heText);
+                var enEntries = ParseSrtContent(enText);
+
+                if (heEntries.Count == 0 || enEntries.Count == 0) return;
+
+                // Monotonic alignment: YouTube translations can have slight shifts or different segment counts.
+                // We advance sequentially through both tracks so no Hebrew line is repeated or attached to wrong English lines.
+                var mergedSb = new StringBuilder();
+                int counter = 1;
+                int heIndex = 0;
+
+                foreach (var en in enEntries)
+                {
+                    // Find the best matching Hebrew entry at or after heIndex
+                    int bestHeIdx = -1;
+                    double bestScore = double.MaxValue;
+
+                    for (int i = heIndex; i < heEntries.Count; i++)
+                    {
+                        var h = heEntries[i];
+                        // If Hebrew entry starts more than 5 seconds after English ends, stop scanning
+                        if ((h.Start - en.End).TotalSeconds > 5) break;
+
+                        // Calculate time difference between starts
+                        double diff = Math.Abs((h.Start - en.Start).TotalMilliseconds);
+                        bool overlaps = (h.Start <= en.End && h.End >= en.Start);
+
+                        if (overlaps || diff < 2000)
+                        {
+                            if (diff < bestScore)
+                            {
+                                bestScore = diff;
+                                bestHeIdx = i;
+                            }
+                        }
+                    }
+
+                    string heLine = "";
+                    if (bestHeIdx != -1)
+                    {
+                        heLine = heEntries[bestHeIdx].Text;
+                        // Advance heIndex so subsequent English lines don't reuse the same Hebrew line
+                        heIndex = bestHeIdx + 1;
+                    }
+
+                    string enLine = en.Text;
+
+                    string combinedText;
+                    if (!string.IsNullOrWhiteSpace(heLine) && !string.Equals(heLine, enLine, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // User requirement: English on TOP, Hebrew underneath
+                        combinedText = $"{enLine}\n{heLine}";
+                    }
+                    else
+                    {
+                        combinedText = enLine;
+                    }
+
+                    string startTime = $"{en.Start:hh\\:mm\\:ss\\,fff}";
+                    string endTime = $"{en.End:hh\\:mm\\:ss\\,fff}";
+
+                    mergedSb.AppendLine(counter.ToString());
+                    mergedSb.AppendLine($"{startTime} --> {endTime}");
+                    mergedSb.AppendLine(combinedText);
+                    mergedSb.AppendLine();
+
+                    counter++;
+                }
+
+                if (mergedSb.Length > 0)
+                {
+                    // Determine base clean name
+                    string firstMediaFile = Directory.GetFiles(dir)
+                        .FirstOrDefault(f => !f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase) &&
+                                             !f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) &&
+                                             !f.EndsWith(".lrc", StringComparison.OrdinalIgnoreCase) &&
+                                             !Path.GetFileName(f).Equals("cookies.txt", StringComparison.OrdinalIgnoreCase));
+
+                    string baseName = firstMediaFile != null
+                        ? Path.GetFileNameWithoutExtension(firstMediaFile)
+                        : Path.GetFileNameWithoutExtension(heFile);
+
+                    baseName = Regex.Replace(baseName, @"\.(iw|he|en|iw-orig|he-orig|en-orig)(-[a-z0-9]+)*$", "", RegexOptions.IgnoreCase);
+
+                    string mergedFilePath = Path.Combine(dir, $"{baseName}.srt");
+
+                    // Delete ALL other srt files in temp dir so ONLY the merged file remains!
+                    foreach (var f in srtFiles)
+                    {
+                        try { File.Delete(f); } catch { }
+                    }
+
+                    File.WriteAllText(mergedFilePath, mergedSb.ToString().Trim() + "\n", new UTF8Encoding(false));
+
+                    try
+                    {
+                        string logFile = PathUtils.GetLogFilePath();
+                        File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [BilingualMerge] Successfully created dual English(top)+Hebrew(bottom) SRT: {Path.GetFileName(mergedFilePath)}\n");
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    string logFile = PathUtils.GetLogFilePath();
+                    File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [BilingualMerge] Exception: {ex.Message}\n");
+                }
+                catch { }
+            }
+        }
+
+        private static List<string> SplitIntoWordChunks(string text, int maxWords = 5)
+        {
+            var words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length <= maxWords) return new List<string> { text };
+
+            var chunks = new List<string>();
+            for (int i = 0; i < words.Length; i += maxWords)
+            {
+                int count = Math.Min(maxWords, words.Length - i);
+                chunks.Add(string.Join(" ", words.Skip(i).Take(count)));
+            }
+            return chunks;
+        }
+
+        private static string ConvertSrtToLrc(string srtContent)
+        {
+            var entries = ParseSrtContent(srtContent);
+            if (entries.Count == 0) return srtContent;
+
+            var sb = new StringBuilder();
+
+            foreach (var entry in entries)
+            {
+                var rawLines = entry.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                                         .Select(l => l.Trim())
+                                         .Where(l => !string.IsNullOrWhiteSpace(l))
+                                         .ToList();
+
+                if (rawLines.Count == 0) continue;
+
+                int mm = (int)entry.Start.TotalMinutes;
+                int ss = entry.Start.Seconds;
+                int cs = entry.Start.Milliseconds / 10;
+                string timeTag = $"[{mm:D2}:{ss:D2}.{cs:D2}]";
+
+                // Check for bilingual block (English on top, Hebrew on bottom, or vice versa)
+                bool isBilingual = rawLines.Count >= 2 &&
+                    rawLines.Any(l => Regex.IsMatch(l, @"[A-Za-z]")) &&
+                    rawLines.Any(l => Regex.IsMatch(l, @"[\u0590-\u05FF]"));
+
+                if (isBilingual)
+                {
+                    var enParts = rawLines.Where(l => Regex.IsMatch(l, @"[A-Za-z]")).ToList();
+                    var heParts = rawLines.Where(l => Regex.IsMatch(l, @"[\u0590-\u05FF]")).ToList();
+
+                    string enText = string.Join(" ", enParts);
+                    string heText = string.Join(" ", heParts);
+
+                    // English on top, Hebrew underneath, both with the exact same timestamp
+                    sb.AppendLine($"{timeTag}{enText}");
+                    sb.AppendLine($"{timeTag}{heText}");
+                }
+                else
+                {
+                    foreach (var line in rawLines)
+                    {
+                        sb.AppendLine($"{timeTag}{line}");
+                    }
+                }
+            }
+
+            return sb.ToString().Trim();
         }
     }
 }

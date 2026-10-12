@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using SsshmulDownloader.ArtistTracker;
+using SsshmulDownloader.Engine;
 using SsshmulDownloader.Server;
 using SsshmulDownloader.Storage;
 using WpfApplication = System.Windows.Application;
@@ -115,7 +116,10 @@ namespace SsshmulDownloader
             // 3. Start artist scheduler
             ArtistScheduler.Start();
 
-            // 4. Initialize System Tray
+            // 4. Start background update checker
+            UpdateManager.StartBackgroundChecker();
+
+            // 5. Initialize System Tray
             InitNotifyIcon();
 
             // 5. Initialize WebView2
@@ -126,15 +130,35 @@ namespace SsshmulDownloader
                 try
                 {
                     env = await CoreWebView2Environment.CreateAsync(null, profileDir);
+                    await MainWebView.EnsureCoreWebView2Async(env);
                 }
                 catch (Exception)
                 {
-                    // If locked (0x800700AA / ERROR_BUSY) or in use, fallback to a unique temp directory
+                    // If locked (0x800700AA / ERROR_BUSY / in-use), fallback to a fresh unique temp directory
+                    // Since EnsureCoreWebView2Async cannot be called twice on the same WebView2 instance with different environments,
+                    // we replace MainWebView in the visual tree with a fresh instance.
                     string fallbackDir = Path.Combine(Path.GetTempPath(), $"Ssshmul_WV2_{Guid.NewGuid():N}");
                     env = await CoreWebView2Environment.CreateAsync(null, fallbackDir);
-                }
 
-                await MainWebView.EnsureCoreWebView2Async(env);
+                    var newWebView = new Microsoft.Web.WebView2.Wpf.WebView2
+                    {
+                        HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+                        VerticalAlignment = System.Windows.VerticalAlignment.Stretch
+                    };
+                    
+                    if (MainGrid.Children.Contains(MainWebView))
+                    {
+                        int idx = MainGrid.Children.IndexOf(MainWebView);
+                        MainGrid.Children.Remove(MainWebView);
+                        MainGrid.Children.Insert(idx, newWebView);
+                    }
+                    else
+                    {
+                        MainGrid.Children.Insert(0, newWebView);
+                    }
+                    MainWebView = newWebView;
+                    await MainWebView.EnsureCoreWebView2Async(env);
+                }
 
                 MainWebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 MainWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
@@ -213,6 +237,14 @@ namespace SsshmulDownloader
                         _notifyIcon.ShowBalloonTip(4000, title, text, ToolTipIcon.Info);
                     });
                 };
+
+                UpdateManager.UpdateNotificationTriggered += (title, text) =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        _notifyIcon.ShowBalloonTip(5000, title, text, ToolTipIcon.Info);
+                    });
+                };
             }
             catch (Exception ex)
             {
@@ -241,6 +273,7 @@ namespace SsshmulDownloader
             _notifyIcon?.Dispose();
             _httpServer.Stop();
             ArtistScheduler.Stop();
+            UpdateManager.StopBackgroundChecker();
         }
     }
 }

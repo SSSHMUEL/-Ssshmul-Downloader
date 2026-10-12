@@ -5,6 +5,8 @@ using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using SsshmulDownloader.Models;
+using SsshmulDownloader.Server;
 
 namespace SsshmulDownloader.Engine
 {
@@ -22,6 +24,11 @@ namespace SsshmulDownloader.Engine
     {
         private const string GitHubRepo = "SSSHMUEL/-Ssshmul-Downloader";
         private static readonly HttpClient _httpClient = new();
+        private static System.Threading.Timer? _updateTimer;
+        public static event Action<string, string>? UpdateNotificationTriggered;
+        private static UpdateInfo? _lastDiscoveredUpdate;
+
+        public static UpdateInfo? LastDiscoveredUpdate => _lastDiscoveredUpdate;
 
         static UpdateManager()
         {
@@ -99,8 +106,23 @@ namespace SsshmulDownloader.Engine
             return updateInfo;
         }
 
+        public const string AllowedDownloadPrefix = "https://github.com/SSSHMUEL/-Ssshmul-Downloader/releases/download/";
+
+        public static bool IsValidDownloadUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            if (uri.Scheme != Uri.UriSchemeHttps) return false;
+            return url.StartsWith(AllowedDownloadPrefix, StringComparison.OrdinalIgnoreCase) && url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static async Task<string> DownloadAndLaunchInstallerAsync(string downloadUrl, Action<int>? onProgress = null)
         {
+            if (!IsValidDownloadUrl(downloadUrl))
+            {
+                throw new InvalidOperationException("Invalid or unauthorized update download URL.");
+            }
+
             string tempInstaller = Path.Combine(Path.GetTempPath(), $"SsshmulDownloader_Setup_{Guid.NewGuid():N}.exe");
 
             using (var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -140,6 +162,60 @@ namespace SsshmulDownloader.Engine
             // Exit current application cleanly
             Environment.Exit(0);
             return tempInstaller;
+        }
+
+        public static void StartBackgroundChecker()
+        {
+            // Initial check delayed by 15 seconds after app startup
+            Task.Delay(TimeSpan.FromSeconds(15)).ContinueWith(async _ =>
+            {
+                await PerformAutoUpdateCheckAsync();
+            });
+
+            // Periodic check every 6 hours
+            _updateTimer?.Dispose();
+            TimeSpan interval = TimeSpan.FromHours(6);
+            _updateTimer = new System.Threading.Timer(async _ =>
+            {
+                await PerformAutoUpdateCheckAsync();
+            }, null, interval, interval);
+        }
+
+        public static void StopBackgroundChecker()
+        {
+            _updateTimer?.Dispose();
+            _updateTimer = null;
+        }
+
+        public static async Task<UpdateInfo> PerformAutoUpdateCheckAsync()
+        {
+            try
+            {
+                var info = await CheckForUpdatesAsync();
+                if (info.HasUpdate && !string.IsNullOrWhiteSpace(info.DownloadUrl))
+                {
+                    _lastDiscoveredUpdate = info;
+                    
+                    // Notify system tray if available
+                    UpdateNotificationTriggered?.Invoke(
+                        "עדכון חדש זמין! 🚀", 
+                        $"גרסה {info.LatestVersion} זמינה להורדה והתקנה ב-Ssshmul Downloader."
+                    );
+
+                    // Notify connected clients (extension / web UI)
+                    _ = LocalWebSocketServer.BroadcastAsync(new DownloadMessage("update_status")
+                    {
+                        UpdateInfo = info,
+                        CurrentVersion = GetCurrentVersion()
+                    });
+                }
+                return info;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UpdateManager] Auto check error: {ex.Message}");
+                return new UpdateInfo { CurrentVersion = GetCurrentVersion(), LatestVersion = GetCurrentVersion() };
+            }
         }
 
         private static bool IsNewerVersion(string currentVersion, string latestVersion)

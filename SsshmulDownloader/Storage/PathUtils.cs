@@ -132,15 +132,26 @@ namespace SsshmulDownloader.Storage
             return trackerDir;
         }
 
+        public static string GetActiveArtistTrackerDirectory()
+        {
+            string baseTrackerDir = !string.IsNullOrWhiteSpace(SettingsStore.Current.ArtistTrackerSavePath)
+                ? SettingsStore.Current.ArtistTrackerSavePath
+                : GetDefaultArtistTrackerDirectory();
+
+            if (!Directory.Exists(baseTrackerDir))
+            {
+                try { Directory.CreateDirectory(baseTrackerDir); } catch { }
+            }
+            return baseTrackerDir;
+        }
+
         public static string GetArtistDirectory(string artistName)
         {
             string cleanName = SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanArtistName(artistName);
             string safeFolder = SsshmulDownloader.ArtistTracker.DeduplicationEngine.SanitizeFolderName(cleanName);
             if (string.IsNullOrWhiteSpace(safeFolder)) safeFolder = "אמן לא ידוע";
 
-            string baseTrackerDir = !string.IsNullOrWhiteSpace(SettingsStore.Current.ArtistTrackerSavePath)
-                ? SettingsStore.Current.ArtistTrackerSavePath
-                : GetDefaultArtistTrackerDirectory();
+            string baseTrackerDir = GetActiveArtistTrackerDirectory();
 
             string artistDir = Path.Combine(baseTrackerDir, safeFolder);
             if (!Directory.Exists(artistDir))

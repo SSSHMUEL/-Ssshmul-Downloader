@@ -28,6 +28,32 @@ namespace SsshmulDownloader.ArtistTracker
             return Regex.Replace(cleaned, @"[\\/:*?""<>|]", "_").Trim();
         }
 
+        public static string CleanSongTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return string.Empty;
+            string clean = title.Trim();
+
+            // Remove YouTube suffix
+            clean = Regex.Replace(clean, @"\s*-\s*youtube$", "", RegexOptions.IgnoreCase);
+
+            // Strip video tags, brackets, and common video-only indicators (repeat to handle adjacent brackets)
+            for (int i = 0; i < 2; i++)
+            {
+                clean = Regex.Replace(clean, @"\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\]", "", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\)", "", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\}", "", RegexOptions.IgnoreCase);
+            }
+
+            clean = Regex.Replace(clean, @"\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b", "", RegexOptions.IgnoreCase);
+
+            // Clean redundant extra spaces and trailing/leading separators
+            clean = Regex.Replace(clean, @"[\s\-_|:]+$", "");
+            clean = Regex.Replace(clean, @"^[\s\-_|:]+", "");
+            clean = Regex.Replace(clean, @"\s{2,}", " ").Trim();
+
+            return string.IsNullOrWhiteSpace(clean) ? (title?.Trim() ?? string.Empty) : clean;
+        }
+
         public static string NormalizeSongTitle(string? title, string? artistName)
         {
             if (string.IsNullOrWhiteSpace(title)) return string.Empty;
@@ -43,10 +69,13 @@ namespace SsshmulDownloader.ArtistTracker
             // Remove YouTube suffix
             clean = Regex.Replace(clean, @"\s*-\s*youtube$", "", RegexOptions.IgnoreCase);
 
-            // Strip video tags, brackets, and common video-only indicators
-            clean = Regex.Replace(clean, @"\[(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|visualizer)\]", " ", RegexOptions.IgnoreCase);
-            clean = Regex.Replace(clean, @"\((?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|visualizer)\)", " ", RegexOptions.IgnoreCase);
-            clean = Regex.Replace(clean, @"\b(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b", " ", RegexOptions.IgnoreCase);
+            // Strip video tags, brackets, and common video-only indicators (repeat to handle adjacent brackets like (Lyric Video) (Official))
+            for (int i = 0; i < 2; i++)
+            {
+                clean = Regex.Replace(clean, @"\[(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|official\s*track|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\]", " ", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\((?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|official\s*track|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\)", " ", RegexOptions.IgnoreCase);
+            }
+            clean = Regex.Replace(clean, @"\b(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b", " ", RegexOptions.IgnoreCase);
 
             // Strip version variations: Radio Edit, Cinematic, Acoustic, Deluxe, Remix, Slowed, Sped Up, Instrumental, Mixed, Live, Version, Stripped, Piano, Strings, Sessions, Acapella
             clean = Regex.Replace(clean, @"\[(?:radio\s*edit|cinematic|acoustic|deluxe(?:\s*mix)?|remix|club\s*mix|vip\s*mix|slowed(?:\s*\+\s*reverb)?|sped\s*up|speed\s*up|nightcore|instrumental|mixed|live(?:\s*from|\s*at|\s*in|\s*version)?|ballad|single\s*version|film\s*version|wedding\s*version|extended|unplugged|stripped|piano\s*version|strings\s*version|acapella|sessions?|village\s*sessions?|orchestral)\]", " ", RegexOptions.IgnoreCase);
@@ -63,6 +92,58 @@ namespace SsshmulDownloader.ArtistTracker
             clean = Regex.Replace(clean, @"\s{2,}", " ").Trim();
 
             return clean;
+        }
+
+        public static bool IsFileMatchingSong(string fileNameNoExt, string songTitle, string? artistName)
+        {
+            if (string.IsNullOrWhiteSpace(fileNameNoExt) || string.IsNullOrWhiteSpace(songTitle))
+                return false;
+
+            // 1. Exact match (case insensitive)
+            if (string.Equals(fileNameNoExt.Trim(), songTitle.Trim(), StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // 2. Normalized title match
+            string normFile = NormalizeSongTitle(fileNameNoExt, artistName);
+            string normSong = NormalizeSongTitle(songTitle, artistName);
+            if (!string.IsNullOrWhiteSpace(normFile) && !string.IsNullOrWhiteSpace(normSong))
+            {
+                if (string.Equals(normFile, normSong, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                // Strip leading track numbers like "01. ", "02 - ", "1. "
+                string stripNumbersFile = Regex.Replace(normFile, @"^\d+[\s.\-_]+", "").Trim();
+                string stripNumbersSong = Regex.Replace(normSong, @"^\d+[\s.\-_]+", "").Trim();
+                if (!string.IsNullOrWhiteSpace(stripNumbersFile) && !string.IsNullOrWhiteSpace(stripNumbersSong))
+                {
+                    if (string.Equals(stripNumbersFile, stripNumbersSong, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+
+                // If one contains the other and length >= 4
+                if (normFile.Length >= 4 && normSong.Length >= 4)
+                {
+                    if (normFile.Contains(normSong, StringComparison.OrdinalIgnoreCase) ||
+                        normSong.Contains(normFile, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // 3. Raw contains match
+            string rawFile = fileNameNoExt.Trim();
+            string rawSong = songTitle.Trim();
+            if (rawFile.Length >= 4 && rawSong.Length >= 4)
+            {
+                if (rawFile.Contains(rawSong, StringComparison.OrdinalIgnoreCase) ||
+                    rawSong.Contains(rawFile, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public static bool IsVariantOrNonStudioTrack(string title)
@@ -133,6 +214,17 @@ namespace SsshmulDownloader.ArtistTracker
                 lower.Contains("tribute") || lower.Contains("karaoke") || lower.Contains("קריוקי") ||
                 lower.Contains("פלייבק") || lower.Contains("backing track") || lower.Contains("instrumental") ||
                 lower.Contains("piano tutorial") || lower.Contains("guitar tutorial") || lower.Contains("how to play"))
+            {
+                return true;
+            }
+
+            // Playlists, fan-made / unofficial albums, greatest hits, full live performances, vlog-style titles
+            if (lower.Contains("playlist") || lower.Contains("פלייליסט") || lower.Contains("unofficial") ||
+                lower.Contains("fan-made") || lower.Contains("fan made") || lower.Contains("greatest hits") ||
+                lower.Contains("best songs") || lower.Contains("best of") || lower.Contains("full album") ||
+                lower.Contains("full live") || lower.Contains("live performance") || lower.Contains("(lyrics)") ||
+                lower.Contains("joins me") || lower.Contains("플레이리스트") || lower.Contains(" hours") || lower.Contains("1 hour") ||
+                lower.Contains("album) 20") || lower.Contains("album 20"))
             {
                 return true;
             }
@@ -221,12 +313,15 @@ namespace SsshmulDownloader.ArtistTracker
             if (t.Contains("deluxe") || t.Contains("ballad") || t.Contains("extended")) score -= 30;
 
             // Bonus for standard clean studio / official audio release
-            if (t.Contains("official audio") || t.Contains("אודיו רשמי")) score += 30;
-            else if (t.Contains("גרסת אולפן") || t.Contains("studio version") || t.Contains("original mix")) score += 25;
-            else if (!t.Contains("(") && !t.Contains("[") && !t.Contains("-")) score += 20; // Purest cleanest title!
+            if (t.Contains("official audio") || t.Contains("אודיו רשמי")) score += 35;
+            else if (t.Contains("גרסת אולפן") || t.Contains("studio version") || t.Contains("original mix")) score += 30;
+            else if (!t.Contains("(") && !t.Contains("[") && !t.Contains("-")) score += 25; // Purest cleanest studio title!
 
-            // Lower priority for video clips if audio exists
-            if (t.Contains("official music video") || t.Contains("music video") || t.Contains("קליפ רשמי")) score -= 15;
+            // Video clips vs lyric videos:
+            // Lyric videos are audio with text, but official audio is best.
+            // Music video clips often contain sound effects, intro/outro dialogue, so penalize them significantly.
+            if (t.Contains("official music video") || t.Contains("music video") || t.Contains("קליפ רשמי") || t.Contains("video clip") || t.Contains("קליפ")) score -= 25;
+            else if (t.Contains("lyric video") || t.Contains("lyrics video") || t.Contains("official lyrics") || t.Contains("מילים")) score -= 5;
 
             // Heavily penalize foreign language translated lyrics
             if (t.Contains("spanish lyric") || t.Contains("portuguese lyric") ||

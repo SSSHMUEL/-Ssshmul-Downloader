@@ -290,7 +290,7 @@ function selectFormatAndQuality(formatType, qualityFormat, showFeedback = true) 
 function startServer() {
     // showToast('🚀 מפעיל את שרת Ssshmul Downloader ברקע...');
     try {
-        chrome.runtime.sendNativeMessage('com.nfdownloader.host', { action: 'start_server' }, (resp) => {
+        chrome.runtime.sendNativeMessage('com.ssshmuldownloader.host', { action: 'start_server' }, (resp) => {
             if (chrome.runtime.lastError) {
                 // Fallback to custom protocol
                 const ifr = document.createElement('iframe');
@@ -328,7 +328,7 @@ function stopServer() {
 
     // 3. Send via Native Messaging Host
     try {
-        chrome.runtime.sendNativeMessage('com.nfdownloader.host', { action: 'stop_server' }, () => {
+        chrome.runtime.sendNativeMessage('com.ssshmuldownloader.host', { action: 'stop_server' }, () => {
             if (chrome.runtime.lastError) {}
         });
     } catch (e) {}
@@ -361,6 +361,7 @@ function getYoutubeCookies() {
                             return;
                         }
                     }
+                    // Fallback to background query
                     fallbackBgCookies(resolve);
                 });
                 return;
@@ -587,8 +588,11 @@ function handleServerMessage(data) {
         } else {
             if (statusDesc) statusDesc.textContent = 'התוכנה מעודכנת לגרסה האחרונה ✔️';
             if (actionContainer) actionContainer.classList.add('hidden');
-            showToast('התוכנה מעודכנת לגרסה העדכנית ביותר');
+            if (window._isManualUpdateCheck) {
+                showToast('התוכנה מעודכנת לגרסה העדכנית ביותר');
+            }
         }
+        window._isManualUpdateCheck = false;
         return;
     }
 
@@ -805,19 +809,30 @@ function handleServerMessage(data) {
         
         let friendlyErr = error || 'ההורדה נכשלה';
         if (friendlyErr.includes('Chrome cookie') || friendlyErr.includes('PermissionError') || friendlyErr.includes('דפדפן Chrome נעול')) {
-            friendlyErr = 'שגיאת עוגיות: יש לפתוח את תוסף הדפדפן (Ssshmul), להיכנס להגדרות ⚙️ וללחוץ "רענן עוגיות מהדפדפן", או לסגור את Chrome.';
+            friendlyErr = 'שגיאת עוגיות: יש לפתוח את הגדרות התוסף ⚙️ וללחוץ "רענן עוגיות מהדפדפן", או לסגור את Chrome.';
         } else if (friendlyErr.includes('cookies are no longer valid') || friendlyErr.includes('העוגיות פגו')) {
-            friendlyErr = 'שגיאת עוגיות: העוגיות פגו. יש להיכנס להגדרות ⚙️ בתוסף הדפדפן וללחוץ "רענן עוגיות מהדפדפן".';
+            friendlyErr = 'שגיאת עוגיות: העוגיות פגו. יש להיכנס להגדרות ⚙️ בתוסף וללחוץ "רענן עוגיות מהדפדפן".';
         } else if (friendlyErr.includes('אימות משתמש') || friendlyErr.includes('Sign in to confirm')) {
-            friendlyErr = 'יוטיוב דורש אימות: פתח את תוסף הדפדפן, היכנס להגדרות ⚙️ ולחץ "רענן עוגיות מהדפדפן" (ודא שאתה מחובר ליוטיוב).';
+            friendlyErr = 'יוטיוב דורש אימות: היכנס להגדרות ⚙️ בתוסף ולחץ "רענן עוגיות מהדפדפן" (ודא שאתה מחובר לחשבון).';
         } else if (friendlyErr.includes('subtitles') && (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests') || friendlyErr.includes('HTTP Error'))) {
-            friendlyErr = 'הורדת הכתוביות נכשלה (חסימת עומס 429 מיוטיוב ⚠️)';
+            friendlyErr = 'הורדת הכתוביות נחסמה עקב עומס מיוטיוב (שגיאה 429 ⚠️)';
         } else if (friendlyErr.includes('Blocked by NetFree') || friendlyErr.includes('418') || friendlyErr.includes('נחסם על ידי נטפרי')) {
             friendlyErr = 'הסרטון חסום בנטפרי 🔒';
+        } else if (friendlyErr.includes('429') || friendlyErr.includes('Too Many Requests')) {
+            friendlyErr = 'יוטיוב חסם זמנית עקב עומס בקשות (429). המתן מספר דקות או רענן עוגיות.';
+        } else if (friendlyErr.includes('Video unavailable') || friendlyErr.includes('לא זמין')) {
+            friendlyErr = 'הסרטון אינו זמין או הוגדר כפרטי.';
         } else if (friendlyErr.includes('unable to extract') || friendlyErr.includes('ffprobe') || friendlyErr.includes('PO Token')) {
             friendlyErr = 'שגיאת פענוח ביוטיוב. יש לעדכן את yt-dlp או לנסות שנית.';
-        } else if (friendlyErr.length > 140) {
-            friendlyErr = friendlyErr.substring(0, 135) + '...';
+        } else if (friendlyErr.includes('Private video')) {
+            friendlyErr = 'סרטון זה פרטי ולא ניתן להורדה.';
+        } else if (friendlyErr.includes('Members-only')) {
+            friendlyErr = 'סרטון זה מיועד למנויים בתשלום בלבד.';
+        }
+
+        statusDesc.title = error || friendlyErr;
+        if (friendlyErr.length > 100) {
+            friendlyErr = friendlyErr.substring(0, 95) + '...';
         }
 
         statusDesc.textContent = friendlyErr;
@@ -1314,14 +1329,25 @@ async function downloadSingleVideo(videoId) {
     proceedSingleDownload(video);
 }
 
-function cleanSongQuery(title) {
+function cleanSongTitle(title) {
     if (!title) return '';
     let cleaned = title;
+    // Remove " - YouTube" or similar site suffixes
     cleaned = cleaned.replace(/\s*-\s*YouTube$/i, '');
-    cleaned = cleaned.replace(/[([{\-]\s*(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|מילים|אודיו|גרסת\s*אולפן)\s*[)\]}]/gi, '');
-    cleaned = cleaned.replace(/(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי)\b/gi, '');
+    // Remove common video-only tags, parentheses, and brackets (repeat to handle adjacent brackets like (Lyric Video) (Official))
+    for (let i = 0; i < 2; i++) {
+        cleaned = cleaned.replace(/\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\]/gi, '');
+        cleaned = cleaned.replace(/\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\)/gi, '');
+        cleaned = cleaned.replace(/\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\}/gi, '');
+    }
+    cleaned = cleaned.replace(/\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b/gi, '');
+    // Clean redundant extra spaces and trailing dashes
     cleaned = cleaned.replace(/[\s\-_|:]+$/g, '').replace(/^[\s\-_|:]+/g, '').replace(/\s{2,}/g, ' ').trim();
-    return cleaned;
+    return cleaned || title;
+}
+
+function cleanSongQuery(title) {
+    return cleanSongTitle(title);
 }
 
 async function findCleanAudioVersion(url, currentTitle, originalChannel = '') {
@@ -1770,16 +1796,14 @@ async function proceedSingleDownload(video) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-        fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
-    }
+    const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
 
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: finalUrl,
         directUrl: null,
-        customTitle: finalTitle,
+        customTitle: effectiveTitle,
         customThumbnail: finalThumbnail,
         customSavePath: storage.customSavePath || null,
         formatId: selectedQuality,
@@ -1794,7 +1818,7 @@ async function proceedSingleDownload(video) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: finalTitle,
+        title: effectiveTitle,
         thumbnail: finalThumbnail,
         percent: '0',
         speed: ''
@@ -2642,16 +2666,14 @@ async function proceedDownloadAll() {
         const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
         const selectedQuality = isVideo ? selectedMp4Quality : selectedMp3Quality;
 
-        if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-            fetchAndDownloadSubtitlesFromUrl(video.url || finalUrl, finalTitle);
-        }
+        const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
 
         const msg = {
             type: isVideo ? 'download_video_advanced' : 'download_advanced',
             downloadId: downloadId,
             url: finalUrl,
             directUrl: null,
-            customTitle: finalTitle,
+            customTitle: effectiveTitle,
             customThumbnail: finalThumbnail,
             customSavePath: storage.customSavePath || null,
             formatId: selectedQuality,
@@ -2666,7 +2688,7 @@ async function proceedDownloadAll() {
 
         activeDownloads[downloadId] = {
             id: downloadId,
-            title: finalTitle,
+            title: effectiveTitle,
             thumbnail: finalThumbnail,
             percent: '0',
             speed: ''
@@ -2744,16 +2766,14 @@ async function proceedDownload(url) {
     const downloadId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     const selectedQuality = isVideo ? regularMp4Quality : regularMp3Quality;
 
-    if (storage.downloadSubsDefault === true && (storage.subsTypeDefault || 'separate') === 'separate') {
-        fetchAndDownloadSubtitlesFromUrl(finalUrl, finalTitle);
-    }
+    const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
 
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: finalUrl,
         directUrl: null,
-        customTitle: finalTitle,
+        customTitle: effectiveTitle,
         customThumbnail: finalThumbnail,
         customSavePath: storage.customSavePath || null,
         formatId: selectedQuality,
@@ -2768,7 +2788,7 @@ async function proceedDownload(url) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: finalTitle || 'מוריד...',
+        title: effectiveTitle || 'מוריד...',
         thumbnail: finalThumbnail || 'icon.png',
         percent: '0',
         speed: ''
@@ -3491,6 +3511,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const syncArtistFoldersBtn = document.getElementById('sync-artist-folders-btn');
+    if (syncArtistFoldersBtn) {
+        syncArtistFoldersBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'sync_artist_folders' }));
+                showToast('מסנכרן תיקיות אמנים מתיקיית היעד...');
+            }
+        });
+    }
+
     // Artist scan interval chips
     const intervalChips = document.querySelectorAll('#artist-scan-interval-chips .chip');
     intervalChips.forEach(chip => {
@@ -4121,12 +4151,14 @@ async function downloadArtistSong(song, artist) {
     const cookies = storage.savedCookies || null;
     const destFolder = artist.downloadFolder || storage.artistTrackerSavePath || null;
 
+    const effectiveTitle = (!isVideo && song.title) ? cleanSongTitle(song.title) : song.title;
+
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: songUrl,
         directUrl: null,
-        customTitle: song.title,
+        customTitle: effectiveTitle,
         customThumbnail: song.thumbnail,
         customSavePath: destFolder,
         formatId: selectedFormat,
@@ -4139,7 +4171,7 @@ async function downloadArtistSong(song, artist) {
 
     activeDownloads[downloadId] = {
         id: downloadId,
-        title: song.title,
+        title: effectiveTitle,
         thumbnail: song.thumbnail,
         percent: '0',
         speed: '',
@@ -4338,11 +4370,13 @@ if (checkUpdatesBtn) {
     checkUpdatesBtn.addEventListener('click', () => {
         checkUpdatesBtn.disabled = true;
         checkUpdatesBtn.innerHTML = '<span>⏳ בודק...</span>';
+        window._isManualUpdateCheck = true;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'check_for_updates' }));
         } else {
             checkUpdatesBtn.disabled = false;
             checkUpdatesBtn.innerHTML = '<span>🔍 בדוק עדכונים</span>';
+            window._isManualUpdateCheck = false;
             showToast('השרת אינו מחובר כעת');
         }
     });
@@ -4385,5 +4419,4 @@ if (talkfixAdCard) {
         openExternalLink('https://talkfix.app/?ref=ssshmul_downloader');
     });
 }
-
 

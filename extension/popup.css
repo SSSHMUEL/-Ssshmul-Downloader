@@ -1782,29 +1782,43 @@ input:checked + .slider:before {
 }
 
 .tracking-download-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    background: linear-gradient(135deg, rgba(62, 166, 255, 0.18) 0%, rgba(37, 99, 235, 0.12) 100%);
-    border: 1px solid rgba(62, 166, 255, 0.45);
-    box-shadow: 0 0 12px rgba(62, 166, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    color: var(--yt-spec-text-primary, #ffffff);
-    padding: 4px 10px;
-    border-radius: 16px;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    backdrop-filter: blur(8px);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    user-select: none;
-    animation: fadeIn 0.25s ease forwards;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    background: #e8f0fe !important;
+    border: 1px solid #1a73e8 !important;
+    box-shadow: 0 1px 4px rgba(26, 115, 232, 0.15) !important;
+    color: #0b57d0 !important;
+    padding: 5px 11px !important;
+    border-radius: 16px !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    backdrop-filter: blur(8px) !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    user-select: none !important;
+    animation: fadeIn 0.25s ease forwards !important;
+    white-space: nowrap !important;
 }
 
 .tracking-download-indicator:hover {
-    background: linear-gradient(135deg, rgba(62, 166, 255, 0.28) 0%, rgba(37, 99, 235, 0.22) 100%);
-    border-color: rgba(62, 166, 255, 0.7);
-    box-shadow: 0 0 16px rgba(62, 166, 255, 0.35);
-    transform: translateY(-1px);
+    background: #d3e3fd !important;
+    border-color: #0b57d0 !important;
+    box-shadow: 0 2px 8px rgba(26, 115, 232, 0.25) !important;
+    transform: translateY(-1px) !important;
+}
+
+[data-theme="dark"] .tracking-download-indicator {
+    background: rgba(62, 166, 255, 0.18) !important;
+    border: 1px solid rgba(62, 166, 255, 0.5) !important;
+    box-shadow: 0 0 12px rgba(62, 166, 255, 0.2) !important;
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .tracking-download-indicator:hover {
+    background: rgba(62, 166, 255, 0.28) !important;
+    border-color: rgba(62, 166, 255, 0.8) !important;
+    box-shadow: 0 0 16px rgba(62, 166, 255, 0.35) !important;
 }
 
 .tracking-download-indicator.hidden {
@@ -1812,25 +1826,29 @@ input:checked + .slider:before {
 }
 
 .tracking-indicator-icon-wrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 16px !important;
+    height: 16px !important;
+    flex-shrink: 0 !important;
 }
 
 .indicator-pulse-ring {
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    right: -2px;
-    bottom: -2px;
-    border-radius: 50%;
-    border: 1.5px solid var(--yt-spec-blue-button, #3ea6ff);
-    animation: pulseRingAnim 1.6s cubic-bezier(0.24, 0, 0.38, 1) infinite;
-    pointer-events: none;
+    position: absolute !important;
+    top: -2px !important;
+    left: -2px !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    border-radius: 50% !important;
+    border: 1.5px solid #0b57d0 !important;
+    animation: pulseRingAnim 1.6s cubic-bezier(0.24, 0, 0.38, 1) infinite !important;
+    pointer-events: none !important;
+}
+
+[data-theme="dark"] .indicator-pulse-ring {
+    border-color: #3ea6ff !important;
 }
 
 @keyframes pulseRingAnim {
@@ -1840,8 +1858,12 @@ input:checked + .slider:before {
 }
 
 .tracking-indicator-icon {
-    color: var(--yt-spec-blue-button, #3ea6ff);
-    animation: bounceDown 1.4s ease-in-out infinite;
+    color: #0b57d0 !important;
+    animation: bounceDown 1.4s ease-in-out infinite !important;
+}
+
+[data-theme="dark"] .tracking-indicator-icon {
+    color: #3ea6ff !important;
 }
 
 @keyframes bounceDown {
@@ -1849,10 +1871,12 @@ input:checked + .slider:before {
     50% { transform: translateY(1.5px); }
 }
 
-.tracking-indicator-title {
-    color: #e5e5e5;
-    font-size: 11px;
-    font-weight: 600;
+.tracking-indicator-title,
+#tracking-download-text {
+    color: inherit !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    opacity: 1 !important;
 }
 
 .scan-all-pill {

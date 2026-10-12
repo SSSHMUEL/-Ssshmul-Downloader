@@ -644,6 +644,7 @@ function executeDownload(format, isNetube, btn, customDownloadId) {
 }
 
 function findYouTubeActionBar() {
+    if (window.location.pathname.includes('/shorts/')) return null;
     const selectors = [
         'ytd-watch-metadata ytd-menu-renderer #top-level-buttons-computed',
         'ytd-watch-metadata #actions #top-level-buttons-computed',
@@ -651,14 +652,14 @@ function findYouTubeActionBar() {
         '#top-level-buttons-computed',
         'ytd-menu-renderer #top-level-buttons-computed',
         'ytd-playlist-header-renderer ytd-menu-renderer #top-level-buttons-computed',
-        '#actions-inner #top-level-buttons-computed',
-        '#actions-inner',
         '#owner #subscribe-button',
         'ytd-watch-metadata #actions'
     ];
     for (const sel of selectors) {
         const el = document.querySelector(sel);
-        if (el) return el;
+        if (el && !el.closest('ytd-reel-video-renderer, ytd-shorts, ytd-comments, #comments, ytd-engagement-panel-section-list-renderer')) {
+            return el;
+        }
     }
     return null;
 }
@@ -757,62 +758,68 @@ function getOrCreateGlobalMenu() {
 }
 
 function injectShortsButtons() {
-    const targetActionBars = new Set();
-
-    // 1. Find all action containers across various YouTube Shorts layouts
-    const actionContainers = document.querySelectorAll(
-        'ytd-reel-player-overlay-renderer #actions, ' +
-        'ytd-reel-video-renderer #actions, ' +
-        '#actions.ytd-reel-player-overlay-renderer, ' +
-        'ytd-shorts #actions, ' +
-        '#shorts-player #actions, ' +
-        '#shorts-container #actions, ' +
-        'ytd-reel-player-overlay-renderer #actions-inner, ' +
-        'ytd-reel-video-renderer #actions-inner, ' +
-        'ytd-reel-player-overlay-renderer .ytd-reel-player-overlay-renderer#actions'
+    // 1. Remove any stray buttons mistakenly injected inside comments, replies, or engagement panels
+    const strayButtons = document.querySelectorAll(
+        'ytd-engagement-panel-section-list-renderer .nf-shorts-download-container, ' +
+        'ytd-comments .nf-shorts-download-container, ' +
+        'ytd-comment-thread-renderer .nf-shorts-download-container, ' +
+        'ytd-comment-view-model .nf-shorts-download-container, ' +
+        'ytd-comment-renderer .nf-shorts-download-container, ' +
+        '#comments .nf-shorts-download-container'
     );
-    actionContainers.forEach(el => targetActionBars.add(el));
+    strayButtons.forEach(el => el.remove());
 
-    // 2. Find like buttons directly in shorts to guarantee finding their parent action container
-    const likeButtons = document.querySelectorAll(
-        'ytd-reel-video-renderer ytd-like-button-renderer, ' +
-        'ytd-reel-video-renderer like-button-view-model, ' +
-        'ytd-reel-video-renderer #like-button, ' +
-        'ytd-reel-player-overlay-renderer ytd-like-button-renderer, ' +
-        'ytd-reel-player-overlay-renderer like-button-view-model, ' +
-        'ytd-reel-player-overlay-renderer #like-button, ' +
-        'ytd-shorts ytd-like-button-renderer, ' +
-        'ytd-shorts like-button-view-model, ' +
-        'ytd-shorts #like-button, ' +
-        '#shorts-container ytd-like-button-renderer, ' +
-        '#shorts-container like-button-view-model, ' +
-        'ytd-reel-video-renderer [aria-label*="אהבתי"], ' +
-        'ytd-reel-video-renderer [aria-label*="like" i]'
-    );
-    likeButtons.forEach(likeBtn => {
-        let parent = likeBtn.parentElement;
-        while (parent && parent.tagName !== 'YTD-REEL-VIDEO-RENDERER' && parent.tagName !== 'YTD-REEL-PLAYER-OVERLAY-RENDERER') {
-            if (parent.id === 'actions' || parent.classList.contains('ytd-reel-player-overlay-renderer') || parent.children.length > 2) {
-                targetActionBars.add(parent);
-                break;
-            }
-            parent = parent.parentElement;
+    // 2. Identify reels on the page
+    let reels = Array.from(document.querySelectorAll('ytd-reel-video-renderer'));
+    if (reels.length === 0) {
+        const overlays = Array.from(document.querySelectorAll('ytd-reel-player-overlay-renderer'));
+        if (overlays.length > 0) {
+            reels = overlays;
+        } else {
+            const singleContainer = document.querySelector('#shorts-container, ytd-shorts');
+            if (singleContainer) reels = [singleContainer];
         }
-        if (likeBtn.parentElement) {
-            targetActionBars.add(likeBtn.parentElement);
-        }
-    });
+    }
 
-    targetActionBars.forEach(actions => {
+    reels.forEach(reel => {
+        // Skip if this reel element is part of a comments panel or engagement list
+        if (reel.closest('ytd-engagement-panel-section-list-renderer, ytd-comments, ytd-comment-thread-renderer, ytd-comment-view-model, ytd-comment-renderer, #comments')) {
+            return;
+        }
+
+        // Strictly ensure only ONE download button exists per reel
+        if (reel.querySelector('.nf-shorts-download-container')) {
+            return;
+        }
+
+        const overlay = reel.tagName === 'YTD-REEL-PLAYER-OVERLAY-RENDERER'
+            ? reel
+            : (reel.querySelector('ytd-reel-player-overlay-renderer') || reel);
+
+        // Find the action bar (the vertical bar containing like, comments, share buttons)
+        let actions = overlay.querySelector('#actions-inner') ||
+                      overlay.querySelector('#actions') ||
+                      overlay.querySelector('.ytd-reel-player-overlay-renderer#actions');
+
+        // Locate the video's like button specifically inside the overlay, avoiding any comments
+        const likeButtons = Array.from(overlay.querySelectorAll(
+            'like-button-view-model, ytd-like-button-renderer, #like-button, [aria-label*="אהבתי" i], [aria-label*="like" i]'
+        )).filter(el => !el.closest('ytd-engagement-panel-section-list-renderer, ytd-comments, ytd-comment-thread-renderer, ytd-comment-view-model, ytd-comment-renderer, #comments'));
+
+        if (likeButtons.length === 0 && !actions) {
+            return;
+        }
+
+        const likeBtn = likeButtons[0] || null;
+
+        if (!actions && likeBtn) {
+            actions = likeBtn.parentElement;
+        }
+
         if (!actions) return;
-        if (actions.querySelector('.nf-shorts-download-container')) return;
-
-        // Verify this is indeed an action bar in Shorts
-        const hasShortsElement = actions.closest('ytd-reel-video-renderer') ||
-                                 actions.closest('ytd-reel-player-overlay-renderer') ||
-                                 actions.closest('ytd-shorts') ||
-                                 window.location.pathname.includes('/shorts/');
-        if (!hasShortsElement) return;
+        if (actions.closest('ytd-engagement-panel-section-list-renderer, ytd-comments, ytd-comment-thread-renderer, ytd-comment-view-model, ytd-comment-renderer, #comments')) {
+            return;
+        }
 
         const shortsContainer = document.createElement('div');
         shortsContainer.className = 'nf-shorts-download-container style-scope ytd-reel-player-overlay-renderer';
@@ -855,7 +862,7 @@ function injectShortsButtons() {
 
         btn.innerHTML = `
             <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;">
-                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path>
+                <path d="M12 16.2l3.8-3.8c.4-.4.4-1 0-1.4-.4-.4-1-.4-1.4 0L13 12.4V4.5c0-.6-.4-1-1-1s-1 .4-1 1v7.9l-1.4-1.4c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4l3.8 3.8zm-6 2.8c-.6 0-1 .4-1 1s.4 1 1 1h12c.6 0 1-.4 1-1s-.4-1-1-1H6z"></path>
             </svg>
         `;
 
@@ -902,14 +909,20 @@ function injectShortsButtons() {
         shortsContainer.appendChild(btn);
         shortsContainer.appendChild(label);
 
-        // Position ABOVE the like button
-        const likeBtn = actions.querySelector(
-            'ytd-like-button-renderer, like-button-view-model, #like-button, ' +
-            '[aria-label*="like" i], [aria-label*="אהבתי" i], ytd-toggle-button-renderer'
-        ) || actions.firstElementChild;
+        // Position strictly ABOVE the like button in the actions bar
+        let targetInsertBefore = null;
+        if (likeBtn) {
+            let curr = likeBtn;
+            while (curr && curr.parentElement && curr.parentElement !== actions) {
+                curr = curr.parentElement;
+            }
+            if (curr && curr.parentElement === actions) {
+                targetInsertBefore = curr;
+            }
+        }
 
-        if (likeBtn && likeBtn.parentElement === actions) {
-            actions.insertBefore(shortsContainer, likeBtn);
+        if (targetInsertBefore) {
+            actions.insertBefore(shortsContainer, targetInsertBefore);
         } else {
             actions.prepend(shortsContainer);
         }
@@ -932,7 +945,14 @@ function tryInjectButton() {
     if (isYouTubeEmbed) return;
 
     if (isYouTube) {
-        injectShortsButtons();
+        if (window.location.pathname.includes('/shorts/')) {
+            injectShortsButtons();
+            return;
+        }
+        // Fast early exit if buttons are already in DOM (0ms CPU impact)
+        if (document.querySelector('#nf-download-buttons') || document.querySelector('#nf-download-btn')) {
+            return;
+        }
     }
 
     let isGenericSite = false;
@@ -968,12 +988,12 @@ function tryInjectButton() {
 
     if (!actionBar || document.querySelector('#nf-download-btn') || document.querySelector('#nf-download-buttons')) return;
 
-    // Bold Solid YouTube native SVG icons
-    const ytDownloadIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>`;
+    // YouTube native style SVG icons (rounded friendly 2px stroke weight matching YouTube's action bar)
+    const ytDownloadIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 16.2l3.8-3.8c.4-.4.4-1 0-1.4-.4-.4-1-.4-1.4 0L13 12.4V4.5c0-.6-.4-1-1-1s-1 .4-1 1v7.9l-1.4-1.4c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4l3.8 3.8zm-6 2.8c-.6 0-1 .4-1 1s.4 1 1 1h12c.6 0 1-.4 1-1s-.4-1-1-1H6z"/></svg>`;
     const videoIcon = ytDownloadIcon;
     const audioIcon = ytDownloadIcon;
     const downloadIcon = ytDownloadIcon;
-    const animArrowIcon = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>`;
+    const animArrowIcon = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 16.2l3.8-3.8c.4-.4.4-1 0-1.4-.4-.4-1-.4-1.4 0L13 12.4V4.5c0-.6-.4-1-1-1s-1 .4-1 1v7.9l-1.4-1.4c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4l3.8 3.8zm-6 2.8c-.6 0-1 .4-1 1s.4 1 1 1h12c.6 0 1-.4 1-1s-.4-1-1-1H6z"/></svg>`;
     const checkIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
     const errorIcon = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
 
@@ -1011,7 +1031,7 @@ function tryInjectButton() {
         // YouTube native style button container (Only Video & Audio buttons)
         const btnContainer = document.createElement('div');
         btnContainer.id = 'nf-download-buttons';
-        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 4px; margin-inline-end: 4px; height: 38px; vertical-align: middle; flex-shrink: 0;`;
+        btnContainer.style.cssText = `display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 4px; margin-inline-end: 4px; height: 42px; vertical-align: middle; flex-shrink: 0;`;
 
         function createYtNativeButton(defaultIconSvg, defaultText, format) {
             const btn = document.createElement('button');
@@ -1080,21 +1100,6 @@ function tryInjectButton() {
         btnContainer.appendChild(videoBtn);
         btnContainer.appendChild(audioBtn);
 
-        // 3. TalkFix Promo Pill Button
-        const talkfixPill = document.createElement('a');
-        talkfixPill.href = 'https://talkfix.app/?ref=ssshmul_downloader';
-        talkfixPill.target = '_blank';
-        talkfixPill.rel = 'noopener noreferrer';
-        talkfixPill.className = 'nf-yt-btn nf-talkfix-yt-btn yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m';
-        talkfixPill.title = 'TalkFix - ללמוד אנגלית בטבעיות מתוך סרטונים ושגרת הגלישה ברשת';
-        talkfixPill.innerHTML = `
-            <span class="nf-btn-content" style="gap: 5px; text-decoration: none; color: inherit; display: inline-flex; align-items: center;">
-                <span style="font-size: 13px; line-height: 1;">✨</span>
-                <span class="nf-btn-text" style="background: linear-gradient(90deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 600; letter-spacing: 0.2px;">TalkFix</span>
-            </span>
-        `;
-        talkfixPill.style.cssText = 'text-decoration: none; display: inline-flex; align-items: center; border: 1px solid rgba(129, 140, 248, 0.35); background: rgba(99, 102, 241, 0.12); margin-inline-start: 4px;';
-        btnContainer.appendChild(talkfixPill);
 
         actionBar.prepend(btnContainer);
     }
@@ -1123,18 +1128,19 @@ function ensureYtStyles() {
             display: inline-flex !important;
             align-items: center !important;
             justify-content: center !important;
-            gap: 7px !important;
-            height: 38px !important;
-            min-height: 38px !important;
-            max-height: 38px !important;
-            border-radius: 19px !important;
+            gap: 8px !important;
+            height: 42px !important;
+            min-height: 42px !important;
+            max-height: 42px !important;
+            border-radius: 21px !important;
             border: none !important;
-            padding: 0 18px !important;
-            font-family: "YouTube Sans", "Roboto", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
+            padding: 0 18px 0 14px !important;
+            min-width: 90px !important;
+            font-family: "Roboto", "YouTube Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
             font-size: 14.5px !important;
             font-weight: 500 !important;
-            line-height: 38px !important;
-            letter-spacing: 0.1px !important;
+            line-height: 42px !important;
+            letter-spacing: normal !important;
             cursor: pointer !important;
             box-sizing: border-box !important;
             vertical-align: middle !important;
@@ -1145,8 +1151,6 @@ function ensureYtStyles() {
             text-decoration: none !important;
             margin: 0 !important;
             flex-shrink: 0 !important;
-            backdrop-filter: blur(8px) !important;
-            -webkit-backdrop-filter: blur(8px) !important;
             transition: background-color 0.2s cubic-bezier(0.05, 0, 0, 1), transform 0.1s ease !important;
             
             /* Native YouTube variables & fallback */
@@ -1158,9 +1162,11 @@ function ensureYtStyles() {
         /* Direction handling for leading icon in RTL/LTR */
         html[dir="rtl"] .nf-yt-btn, [dir="rtl"] .nf-yt-btn {
             direction: rtl !important;
+            padding: 0 14px 0 18px !important;
         }
         html:not([dir="rtl"]) .nf-yt-btn {
             direction: ltr !important;
+            padding: 0 18px 0 14px !important;
         }
 
         /* YouTube Light Theme */
@@ -1169,7 +1175,7 @@ function ensureYtStyles() {
         [light] .nf-yt-btn {
             background-color: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05)) !important;
             color: var(--yt-spec-text-primary, #0f0f0f) !important;
-            border: 1px solid rgba(0, 0, 0, 0.04) !important;
+            border: none !important;
         }
         html:not([dark]) .nf-yt-btn:hover:not(:disabled),
         body:not([dark]) .nf-yt-btn:hover:not(:disabled),
@@ -1180,7 +1186,7 @@ function ensureYtStyles() {
         body:not([dark]) .nf-yt-btn:active:not(:disabled),
         [light] .nf-yt-btn:active:not(:disabled) {
             background-color: rgba(0, 0, 0, 0.15) !important;
-            transform: scale(0.97) !important;
+            transform: scale(0.98) !important;
         }
 
         /* YouTube Dark Theme */
@@ -1190,7 +1196,7 @@ function ensureYtStyles() {
         [dark] .nf-yt-btn {
             background-color: var(--yt-spec-badge-chip-background, rgba(255, 255, 255, 0.1)) !important;
             color: var(--yt-spec-text-primary, #f1f1f1) !important;
-            border: 1px solid rgba(255, 255, 255, 0.06) !important;
+            border: none !important;
         }
         html[dark] .nf-yt-btn:hover:not(:disabled),
         body[dark] .nf-yt-btn:hover:not(:disabled),
@@ -1203,7 +1209,7 @@ function ensureYtStyles() {
         ytd-app[dark] .nf-yt-btn:active:not(:disabled),
         [dark] .nf-yt-btn:active:not(:disabled) {
             background-color: rgba(255, 255, 255, 0.25) !important;
-            transform: scale(0.97) !important;
+            transform: scale(0.98) !important;
         }
 
         .nf-yt-btn .nf-btn-icon {
@@ -1213,6 +1219,22 @@ function ensureYtStyles() {
             width: 24px !important;
             height: 24px !important;
             flex-shrink: 0 !important;
+            margin: 0 !important;
+        }
+
+        .nf-yt-btn .nf-btn-icon svg {
+            width: 24px !important;
+            height: 24px !important;
+            display: block !important;
+            fill: currentColor !important;
+        }
+
+        .nf-yt-btn .nf-btn-text {
+            display: inline-block !important;
+            font-size: 14.5px !important;
+            font-weight: 500 !important;
+            line-height: 42px !important;
+            letter-spacing: normal !important;
         }
 
         .nf-yt-btn .nf-progress-fill {
@@ -1223,7 +1245,7 @@ function ensureYtStyles() {
             width: 0%;
             height: 100% !important;
             background: linear-gradient(270deg, rgba(62, 166, 255, 0.35), rgba(62, 166, 255, 0.18)) !important;
-            border-radius: 18px !important;
+            border-radius: 21px !important;
             pointer-events: none !important;
             transition: width 0.25s ease-out !important;
             z-index: 1 !important;
@@ -1252,7 +1274,6 @@ function ensureYtStyles() {
         .nf-yt-btn.is-completed {
             background-color: rgba(43, 166, 64, 0.15) !important;
             color: #2ba640 !important;
-            border: 1px solid rgba(43, 166, 64, 0.3) !important;
         }
         .nf-yt-btn.is-completed .nf-progress-fill {
             display: none !important;
@@ -1261,7 +1282,6 @@ function ensureYtStyles() {
         .nf-yt-btn.is-error {
             background-color: rgba(231, 76, 60, 0.15) !important;
             color: #e74c3c !important;
-            border: 1px solid rgba(231, 76, 60, 0.3) !important;
         }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -1286,14 +1306,14 @@ function handleDownloadWsEvent(data) {
             const pct = Math.min(100, Math.max(0, Math.round(parseFloat(percent) || 0)));
             if (progressFill) progressFill.style.width = `${pct}%`;
             if (iconSpan && !iconSpan.querySelector('.nf-anim-arrow')) {
-                iconSpan.innerHTML = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+                iconSpan.innerHTML = `<svg class="nf-anim-arrow" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 16.2l3.8-3.8c.4-.4.4-1 0-1.4-.4-.4-1-.4-1.4 0L13 12.4V4.5c0-.6-.4-1-1-1s-1 .4-1 1v7.9l-1.4-1.4c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4l3.8 3.8zm-6 2.8c-.6 0-1 .4-1 1s.4 1 1 1h12c.6 0 1-.4 1-1s-.4-1-1-1H6z"/></svg>`;
             }
             if (textSpan) textSpan.textContent = `${pct}%`;
         } else if (type === 'completed') {
             btn.classList.remove('is-starting', 'is-downloading');
             btn.classList.add('is-completed');
             if (progressFill) progressFill.style.width = '100%';
-            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
+            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#2ba640" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>`;
             if (textSpan) textSpan.textContent = i18n.completed;
 
             setTimeout(() => {
@@ -1302,7 +1322,7 @@ function handleDownloadWsEvent(data) {
         } else if (type === 'error') {
             btn.classList.remove('is-starting', 'is-downloading');
             btn.classList.add('is-error');
-            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 20px; height: 20px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+            if (iconSpan) iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="#e74c3c" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
             if (textSpan) textSpan.textContent = i18n.error;
 
             setTimeout(() => {
@@ -1402,8 +1422,23 @@ function injectSingleGenericButton(videoEl) {
     resizeObserver.observe(actionBar);
 }
 
-document.addEventListener('yt-navigate-finish', () => { setTimeout(tryInjectButton, 200); setTimeout(tryInjectButton, 800); setTimeout(tryInjectButton, 1500); });
+let injectDebounceTimer = null;
+function debouncedTryInject() {
+    if (injectDebounceTimer) return;
+    injectDebounceTimer = setTimeout(() => {
+        injectDebounceTimer = null;
+        tryInjectButton();
+    }, 200);
+}
+
+document.addEventListener('yt-navigate-finish', () => { 
+    setTimeout(tryInjectButton, 100); 
+    setTimeout(tryInjectButton, 600); 
+    setTimeout(tryInjectButton, 1500); 
+});
 document.addEventListener('DOMContentLoaded', tryInjectButton);
-const observer = new MutationObserver(() => { tryInjectButton(); });
-if (document.body) { observer.observe(document.body, { childList: true, subtree: true }); }
-setInterval(tryInjectButton, 1000);
+const observer = new MutationObserver(debouncedTryInject);
+if (document.body) { 
+    observer.observe(document.body, { childList: true, subtree: true }); 
+}
+setInterval(tryInjectButton, 2500);

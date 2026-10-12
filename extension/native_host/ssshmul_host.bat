@@ -1,7 +1,7 @@
 @echo off
 where python >nul 2>&1
 if %errorlevel% equ 0 (
-    python "%~dp0nf_host.py" %*
+    python "%~dp0ssshmul_host.py" %*
 ) else (
     if exist "%~dp0..\..\Run-App.bat" (
         start "" "%~dp0..\..\Run-App.bat"

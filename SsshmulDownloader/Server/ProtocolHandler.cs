@@ -16,10 +16,9 @@ namespace SsshmulDownloader.Server
 
                 if (!File.Exists(exePath)) return;
 
-                // Register ssshmul, ssshmuldownloader, and nfdownloader
+                // Register ssshmul and ssshmuldownloader protocols
                 RegisterScheme("ssshmul", exePath);
                 RegisterScheme("ssshmuldownloader", exePath);
-                RegisterScheme("nfdownloader", exePath);
 
                 // Auto-register Native Messaging Host for Chrome, Edge, and Brave
                 RegisterNativeMessagingHost(exePath);
@@ -66,11 +65,11 @@ namespace SsshmulDownloader.Server
 
                 if (Directory.Exists(nativeHostDir))
                 {
-                    string batPath = Path.Combine(nativeHostDir, "nf_host.bat");
-                    string jsonPath = Path.Combine(nativeHostDir, "com.nfdownloader.host.json");
+                    string batPath = Path.Combine(nativeHostDir, "ssshmul_host.bat");
+                    string jsonPath = Path.Combine(nativeHostDir, "com.ssshmuldownloader.host.json");
 
                     string jsonContent = "{\n" +
-                        "  \"name\": \"com.nfdownloader.host\",\n" +
+                        "  \"name\": \"com.ssshmuldownloader.host\",\n" +
                         "  \"description\": \"Ssshmul Downloader Native Messaging Host\",\n" +
                         $"  \"path\": \"{batPath.Replace("\\", "\\\\")}\",\n" +
                         "  \"type\": \"stdio\",\n" +
@@ -82,9 +81,9 @@ namespace SsshmulDownloader.Server
                     File.WriteAllText(jsonPath, jsonContent);
 
                     string[] browsers = new[] {
-                        @"Software\Google\Chrome\NativeMessagingHosts\com.nfdownloader.host",
-                        @"Software\Microsoft\Edge\NativeMessagingHosts\com.nfdownloader.host",
-                        @"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.nfdownloader.host"
+                        @"Software\Google\Chrome\NativeMessagingHosts\com.ssshmuldownloader.host",
+                        @"Software\Microsoft\Edge\NativeMessagingHosts\com.ssshmuldownloader.host",
+                        @"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.ssshmuldownloader.host"
                     };
 
                     foreach (var subKey in browsers)

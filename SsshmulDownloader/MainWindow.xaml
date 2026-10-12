@@ -10,7 +10,7 @@
         WindowStartupLocation="CenterScreen"
         Background="#181818"
         Icon="icon.ico">
-    <Grid Background="Transparent">
+    <Grid x:Name="MainGrid" Background="Transparent">
         <wv2:WebView2 x:Name="MainWebView" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
         <TextBlock x:Name="LoadingText" 
                    Text="טוען את Ssshmul Downloader..." 

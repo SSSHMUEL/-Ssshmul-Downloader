@@ -7,7 +7,7 @@ function wakeServer() {
     return new Promise((resolve) => {
         // 1. Try Native Messaging
         try {
-            chrome.runtime.sendNativeMessage('com.nfdownloader.host', { action: 'start_server' }, (resp) => {
+            chrome.runtime.sendNativeMessage('com.ssshmuldownloader.host', { action: 'start_server' }, (resp) => {
                 if (!chrome.runtime.lastError && resp && resp.status === 'ok') {
                     resolve(true);
                 } else {
@@ -35,17 +35,25 @@ function wakeServer() {
     });
 }
 
-function cleanSongQuery(title) {
+function cleanSongTitle(title) {
     if (!title) return '';
     let cleaned = title;
     // Remove " - YouTube" or similar site suffixes
     cleaned = cleaned.replace(/\s*-\s*YouTube$/i, '');
-    // Remove common video-only tags, parentheses, and brackets
-    cleaned = cleaned.replace(/[([{\-]\s*(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|מילים|אודיו|גרסת\s*אולפן)\s*[)\]}]/gi, '');
-    cleaned = cleaned.replace(/(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי)\b/gi, '');
+    // Remove common video-only tags, parentheses, and brackets (repeat to handle adjacent brackets like (Lyric Video) (Official))
+    for (let i = 0; i < 2; i++) {
+        cleaned = cleaned.replace(/\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\]/gi, '');
+        cleaned = cleaned.replace(/\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\)/gi, '');
+        cleaned = cleaned.replace(/\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\}/gi, '');
+    }
+    cleaned = cleaned.replace(/\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b/gi, '');
     // Clean redundant extra spaces and trailing dashes
     cleaned = cleaned.replace(/[\s\-_|:]+$/g, '').replace(/^[\s\-_|:]+/g, '').replace(/\s{2,}/g, ' ').trim();
-    return cleaned;
+    return cleaned || title;
+}
+
+function cleanSongQuery(title) {
+    return cleanSongTitle(title);
 }
 
 async function findCleanAudioVersion(url, currentTitle, originalChannel = '') {
@@ -179,13 +187,15 @@ async function sendViaWebSocket(req, retryOnFail = true) {
         ? (storage.savedMp4Quality || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best') 
         : (storage.savedMp3Quality || 'mp3_high');
 
+    const effectiveTitle = (!isVideo && finalTitle) ? cleanSongTitle(finalTitle) : finalTitle;
+
     const downloadId = req.downloadId || (Date.now().toString(36) + Math.random().toString(36).substr(2));
     const msg = {
         type: isVideo ? 'download_video_advanced' : 'download_advanced',
         downloadId: downloadId,
         url: finalUrl,
         directUrl: req.directUrl || null,
-        customTitle: finalTitle || null,
+        customTitle: effectiveTitle || null,
         customThumbnail: finalThumbnail || null,
         customSavePath: storage.customSavePath || null,
         formatId: chosenFormat,
@@ -266,10 +276,18 @@ function getYoutubeCookies() {
                 if (!c.domain) return false;
                 const d = c.domain.toLowerCase();
                 if (d.includes('docs.google') || d.includes('cloud.google') || d.includes('drive.google') || 
-                    d.includes('mail.google') || d.includes('gemini.google') || d.includes('play.google')) {
+                    d.includes('mail.google') || d.includes('gemini.google') || d.includes('play.google') ||
+                    d.includes('accounts.google') || d.includes('myaccount.google')) {
                     return false;
                 }
-                return d.includes('youtube.com') || d.includes('googlevideo.com') || d.includes('youtu.be') || d === '.google.com' || d === 'google.com';
+                if (d.includes('youtube.com') || d.includes('googlevideo.com') || d.includes('youtu.be')) {
+                    return true;
+                }
+                if (d === '.google.com' || d === 'google.com') {
+                    const ytAllowedAuthCookies = ['VISITOR_INFO1_LIVE', 'LOGIN_INFO', 'PREF', 'YSC', 'GPS', 'SAPISID', 'APISID', 'SSID', 'HSID', 'SID'];
+                    return ytAllowedAuthCookies.includes(c.name);
+                }
+                return false;
             });
             if (ytCookies.length === 0) {
                 resolve(null);

@@ -15,6 +15,19 @@ namespace SsshmulDownloader.ArtistTracker
             _intervalHours = SettingsStore.Current.ScanIntervalHours;
             if (_intervalHours < 1) _intervalHours = 6;
 
+            // Start directory watcher to monitor folder changes in the artist tracker directory
+            ArtistScanner.StartDirectoryWatcher();
+
+            // Run fast folder synchronization on startup to detect any artist folders
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await ArtistScanner.SyncArtistsFromTargetDirectoryAsync(triggerScan: false);
+                }
+                catch { }
+            });
+
             // Delayed initial scan 30 seconds after startup so app initializes smoothly
             Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ =>
             {
@@ -50,6 +63,7 @@ namespace SsshmulDownloader.ArtistTracker
             {
                 _timer?.Dispose();
                 _timer = null;
+                ArtistScanner.StopDirectoryWatcher();
             }
         }
     }

@@ -18,6 +18,7 @@ namespace SsshmulDownloader.ArtistTracker
     {
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(15) };
         private static readonly SemaphoreSlim _scanLock = new(1, 1);
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _artistScanLocks = new(StringComparer.OrdinalIgnoreCase);
         public static bool IsScanningAll { get; private set; }
 
         public static event Action<string, string>? NotificationTriggered;
@@ -55,7 +56,78 @@ namespace SsshmulDownloader.ArtistTracker
                 PathUtils.ClearSavedCookies();
                 res = await RunResolveAttemptAsync(inputQuery, normalized, null);
             }
+
+            // Fallback: If YouTube search fails or artist not resolved, try Music Catalog directly
+            if (res == null && !inputQuery.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !inputQuery.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                res = await ResolveArtistFromCatalogAsync(inputQuery);
+            }
+
             return res;
+        }
+
+        private static async Task<TrackedArtist?> ResolveArtistFromCatalogAsync(string artistName)
+        {
+            try
+            {
+                string cleanName = DeduplicationEngine.CleanArtistName(artistName);
+                string lookupUrl = $"https://itunes.apple.com/search?term={Uri.EscapeDataString(cleanName)}&entity=musicArtist&limit=3";
+                using var req = new HttpRequestMessage(HttpMethod.Get, lookupUrl);
+                req.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)");
+                using var res = await _httpClient.SendAsync(req);
+                if (res.IsSuccessStatusCode)
+                {
+                    string json = await res.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array && results.GetArrayLength() > 0)
+                    {
+                        var first = results[0];
+                        string foundName = GetStringProp(first, "artistName") ?? cleanName;
+                        long artistId = first.TryGetProperty("artistId", out var idProp) ? idProp.GetInt64() : Math.Abs(foundName.GetHashCode());
+                        string avatarUrl = "";
+
+                        // Try to get artwork from top album
+                        try
+                        {
+                            string albumLookup = $"https://itunes.apple.com/lookup?id={artistId}&entity=album&limit=1";
+                            using var aReq = new HttpRequestMessage(HttpMethod.Get, albumLookup);
+                            aReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)");
+                            using var aRes = await _httpClient.SendAsync(aReq);
+                            if (aRes.IsSuccessStatusCode)
+                            {
+                                string aJson = await aRes.Content.ReadAsStringAsync();
+                                using var aDoc = JsonDocument.Parse(aJson);
+                                if (aDoc.RootElement.TryGetProperty("results", out var aResults) && aResults.ValueKind == JsonValueKind.Array)
+                                {
+                                    foreach (var r in aResults.EnumerateArray())
+                                    {
+                                        if (GetStringProp(r, "wrapperType") == "collection")
+                                        {
+                                            avatarUrl = GetStringProp(r, "artworkUrl100") ?? "";
+                                            if (!string.IsNullOrEmpty(avatarUrl))
+                                            {
+                                                avatarUrl = avatarUrl.Replace("100x100bb", "600x600bb");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+
+                        return new TrackedArtist(
+                            id: "catalog_" + artistId,
+                            name: foundName,
+                            channelUrl: $"ytsearch100:{foundName} topic music",
+                            avatarUrl: avatarUrl
+                        );
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         private static async Task<TrackedArtist?> RunResolveAttemptAsync(string inputQuery, string normalized, string? cookies)
@@ -87,8 +159,6 @@ namespace SsshmulDownloader.ArtistTracker
             psi.ArgumentList.Add("--force-ipv4");
             psi.ArgumentList.Add("--socket-timeout");
             psi.ArgumentList.Add("15");
-            psi.ArgumentList.Add("--extractor-args");
-            psi.ArgumentList.Add("youtube:player_client=ios,android,web_creator");
             psi.ArgumentList.Add("--user-agent");
             psi.ArgumentList.Add("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
@@ -126,6 +196,7 @@ namespace SsshmulDownloader.ArtistTracker
                 }
             }
 
+            psi.ArgumentList.Add("--");
             psi.ArgumentList.Add(normalized);
 
             string binDir = Path.GetDirectoryName(ytdlpPath) ?? "";
@@ -255,6 +326,29 @@ namespace SsshmulDownloader.ArtistTracker
             string ytdlpPath = BinaryResolver.YtDlpPath;
             if (!File.Exists(ytdlpPath)) return newSongs;
 
+            var artistLock = _artistScanLocks.GetOrAdd(artist.Id, _ => new SemaphoreSlim(1, 1));
+            if (!await artistLock.WaitAsync(100))
+            {
+                // Scan already in progress for this artist
+                return newSongs;
+            }
+
+            try
+            {
+                return await ScanArtistInternalAsync(artist, triggerDownload, cookies);
+            }
+            finally
+            {
+                artistLock.Release();
+            }
+        }
+
+        private static async Task<List<ArtistSong>> ScanArtistInternalAsync(TrackedArtist artist, bool triggerDownload, string? cookies = null)
+        {
+            var newSongs = new List<ArtistSong>();
+            string ytdlpPath = BinaryResolver.YtDlpPath;
+            if (!File.Exists(ytdlpPath)) return newSongs;
+
             string logFile = PathUtils.GetLogFilePath();
             string targetUrl = artist.ChannelUrl;
             if (string.IsNullOrWhiteSpace(targetUrl))
@@ -311,6 +405,11 @@ namespace SsshmulDownloader.ArtistTracker
 
             // CRITICAL REQUIREMENT: Intelligent Deduplication!
             // Only selects the best official audio/song version and completely avoids duplicate music video tracks
+            // Only keep uploads from the artist's own / Topic channel; drop fan uploads, playlists, vlogs
+            fetchedSongs = fetchedSongs
+                .Where(s => DeduplicationEngine.IsFromOfficialArtistSource(s, artist.Name, artist.Id) &&
+                            !DeduplicationEngine.IsShortOrPromo(s.Title))
+                .ToList();
             var deduplicatedSongs = DeduplicationEngine.DeduplicateArtistSongs(fetchedSongs, artist.Name, artist.Id);
 
             // Check which songs are already downloaded on disk in artist folder
@@ -318,33 +417,44 @@ namespace SsshmulDownloader.ArtistTracker
                 ? artist.DownloadFolder
                 : PathUtils.GetArtistDirectory(cleanName);
 
-            var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(destFolder))
+            if (string.IsNullOrWhiteSpace(artist.DownloadFolder))
             {
-                try
-                {
-                    foreach (var f in Directory.GetFiles(destFolder))
-                    {
-                        string fn = Path.GetFileNameWithoutExtension(f);
-                        existingFiles.Add(fn);
-                        string normFn = DeduplicationEngine.NormalizeSongTitle(fn, cleanName);
-                        if (!string.IsNullOrWhiteSpace(normFn)) existingFiles.Add(normFn);
-                    }
-                }
-                catch { }
+                artist.DownloadFolder = destFolder;
             }
 
+            var audioExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".mp3", ".m4a", ".mp4", ".opus", ".flac", ".wav", ".aac", ".webm", ".ogg"
+            };
+
+            var audioFilesOnDisk = Directory.Exists(destFolder)
+                ? Directory.GetFiles(destFolder)
+                    .Where(f => audioExtensions.Contains(Path.GetExtension(f)))
+                    .ToList()
+                : new List<string>();
+
             var known = artist.KnownVideoIds;
+            var activeDownloads = DownloadManager.Instance.GetActiveStates();
+
             foreach (var song in deduplicatedSongs)
             {
                 // Check if file already exists on disk
-                string normSong = DeduplicationEngine.NormalizeSongTitle(song.Title, cleanName);
-                if (existingFiles.Contains(song.Title) || (!string.IsNullOrWhiteSpace(normSong) && existingFiles.Contains(normSong)))
+                var matchedFile = audioFilesOnDisk.FirstOrDefault(f =>
+                    DeduplicationEngine.IsFileMatchingSong(Path.GetFileNameWithoutExtension(f), song.Title, cleanName));
+
+                if (matchedFile != null)
                 {
                     song.IsDownloaded = true;
+                    song.FilePath = matchedFile;
                 }
 
-                if (!known.Contains(song.VideoId))
+                // Check if currently downloading in DownloadManager
+                bool isCurrentlyDownloading = activeDownloads.Any(d =>
+                    (!string.IsNullOrEmpty(song.VideoId) && !string.IsNullOrEmpty(d.Id) && d.Id.Contains(song.VideoId)) ||
+                    (!string.IsNullOrEmpty(song.Url) && !string.IsNullOrEmpty(d.Url) && string.Equals(d.Url, song.Url, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(song.Title) && !string.IsNullOrEmpty(d.Title) && string.Equals(d.Title, song.Title, StringComparison.OrdinalIgnoreCase)));
+
+                if (!known.Contains(song.VideoId) && !isCurrentlyDownloading)
                 {
                     newSongs.Add(song);
                 }
@@ -358,14 +468,49 @@ namespace SsshmulDownloader.ArtistTracker
             }
 
             // Update artist model
-            foreach (var s in deduplicatedSongs)
+            // Retain any existing local files or add files on disk that weren't part of the online scan
+            var matchedDiskFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var song in deduplicatedSongs)
             {
-                artist.KnownVideoIds.Add(s.VideoId);
+                if (!string.IsNullOrWhiteSpace(song.FilePath))
+                {
+                    matchedDiskFiles.Add(song.FilePath);
+                }
+            }
+
+            foreach (var f in audioFilesOnDisk)
+            {
+                if (!matchedDiskFiles.Contains(f))
+                {
+                    string fileNameNoExt = Path.GetFileNameWithoutExtension(f);
+                    bool alreadyFound = deduplicatedSongs.Any(s => 
+                        string.Equals(s.FilePath, f, StringComparison.OrdinalIgnoreCase) ||
+                        DeduplicationEngine.IsFileMatchingSong(fileNameNoExt, s.Title, cleanName));
+
+                    if (!alreadyFound)
+                    {
+                        deduplicatedSongs.Add(new ArtistSong(
+                            videoId: "local_" + Math.Abs(fileNameNoExt.GetHashCode()),
+                            title: fileNameNoExt,
+                            url: "",
+                            uploadDate: "",
+                            duration: "",
+                            thumbnail: "",
+                            isOfficialAudio: true,
+                            uploader: artist.Name
+                        )
+                        {
+                            IsDownloaded = true,
+                            FilePath = f,
+                            DownloadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        });
+                    }
+                }
             }
 
             if (deduplicatedSongs.Count > 0)
             {
-                artist.RecentSongs = deduplicatedSongs.Take(250).ToList();
+                artist.RecentSongs = deduplicatedSongs.Take(350).ToList();
             }
 
             artist.LastScannedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -465,8 +610,31 @@ namespace SsshmulDownloader.ArtistTracker
                 ? artist.PreferredFormat 
                 : (isVideo ? "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" : "mp3_high");
 
-            foreach (var song in songs)
+            var startedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var activeTitles = DownloadManager.Instance.GetActiveStates()
+                .Select(a => DeduplicationEngine.NormalizeSongTitle(a.Title, cleanName))
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var filesOnDisk = Directory.Exists(destFolder)
+                ? Directory.GetFiles(destFolder).Select(Path.GetFileNameWithoutExtension).ToList()
+                : new List<string?>();
+
+            // Best version first (official audio > lyric video > music video)
+            var ordered = songs
+                .OrderByDescending(s => DeduplicationEngine.GetSongScore(s, artist.Name, artist.Id))
+                .ToList();
+
+            foreach (var song in ordered)
             {
+                string key = DeduplicationEngine.NormalizeSongTitle(song.Title, cleanName);
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    if (!startedKeys.Add(key) || activeTitles.Contains(key)) continue;
+                    if (filesOnDisk.Any(f => f != null &&
+                        string.Equals(DeduplicationEngine.NormalizeSongTitle(f, cleanName), key, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                }
+
                 string downloadId = $"artist_{song.VideoId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
                 DownloadManager.Instance.StartAdvancedDownload(
                     downloadId: downloadId,
@@ -484,9 +652,6 @@ namespace SsshmulDownloader.ArtistTracker
                     subs: null,
                     tagMappings: null
                 );
-
-                song.IsDownloaded = true;
-                song.DownloadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             }
         }
 
@@ -546,8 +711,6 @@ namespace SsshmulDownloader.ArtistTracker
                     psi.ArgumentList.Add("--force-ipv4");
                     psi.ArgumentList.Add("--socket-timeout");
                     psi.ArgumentList.Add("15");
-                    psi.ArgumentList.Add("--extractor-args");
-                    psi.ArgumentList.Add("youtube:player_client=ios,android,web_creator");
                     psi.ArgumentList.Add("--user-agent");
                     psi.ArgumentList.Add("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
@@ -573,6 +736,7 @@ namespace SsshmulDownloader.ArtistTracker
                         }
                     }
 
+                    psi.ArgumentList.Add("--");
                     psi.ArgumentList.Add(tryUrl);
 
                     string binDir = Path.GetDirectoryName(ytdlpPath) ?? "";
@@ -610,9 +774,9 @@ namespace SsshmulDownloader.ArtistTracker
                                 string title = GetStringProp(root, "title") ?? "";
                                 string url = GetStringProp(root, "url") ?? (videoId != null ? $"https://www.youtube.com/watch?v={videoId}" : "");
                                 string uploadDate = GetStringProp(root, "upload_date") ?? "";
-                                string duration = GetStringProp(root, "duration") ?? "";
-                                string? uploader = GetStringProp(root, "uploader") ?? GetStringProp(root, "channel");
-                                string? chanId = GetStringProp(root, "channel_id") ?? GetStringProp(root, "uploader_id");
+                                string duration = GetDurationSeconds(root);
+                                string? uploader = GetStringProp(root, "uploader") ?? GetStringProp(root, "channel") ?? GetStringProp(root, "playlist_uploader") ?? GetStringProp(root, "playlist_channel");
+                                string? chanId = GetStringProp(root, "channel_id") ?? GetStringProp(root, "uploader_id") ?? GetStringProp(root, "playlist_channel_id");
                                 string thumb = "";
 
                                 if (root.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
@@ -724,6 +888,8 @@ namespace SsshmulDownloader.ArtistTracker
                                                 if (!string.IsNullOrWhiteSpace(norm) && seen.Add(norm))
                                                 {
                                                     tracks.Add(trackName.Trim());
+                                                    if (sItem.TryGetProperty("trackTimeMillis", out var tm) && tm.ValueKind == JsonValueKind.Number)
+                                                        _catalogDurations[cleanName + "|" + norm] = (int)(tm.GetInt64() / 1000);
                                                 }
                                             }
                                         }
@@ -756,11 +922,12 @@ namespace SsshmulDownloader.ArtistTracker
 
             // Step A: Filter trackTitles to remove remix / slowed / sped up / acoustic duplicates
             var filteredTitles = new List<string>();
+            var seenFilteredTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var t in trackTitles)
             {
                 if (DeduplicationEngine.IsShortOrPromo(t) || DeduplicationEngine.IsVariantOrNonStudioTrack(t)) continue;
                 string norm = DeduplicationEngine.NormalizeSongTitle(t, cleanArtist);
-                if (!string.IsNullOrWhiteSpace(norm) && seenTitles.Add(norm))
+                if (!string.IsNullOrWhiteSpace(norm) && seenFilteredTitles.Add(norm))
                 {
                     filteredTitles.Add(t);
                 }
@@ -778,9 +945,10 @@ namespace SsshmulDownloader.ArtistTracker
                     baseChan = baseChan.Substring(0, baseChan.Length - "/releases".Length);
 
                 bulkScanUrls.Add(baseChan + "/releases");
+                bulkScanUrls.Add(baseChan + "/videos");
             }
 
-            bulkScanUrls.Add($"ytsearch50:{cleanArtist} topic music");
+            bulkScanUrls.Add($"ytsearch150:{cleanArtist} topic music");
 
             var allCandidatePool = await FetchArtistSongsFromUrlsAsync(artist, bulkScanUrls, cookies, ytdlpPath, logFile);
 
@@ -790,6 +958,7 @@ namespace SsshmulDownloader.ArtistTracker
             {
                 if (DeduplicationEngine.IsShortOrPromo(c.Title) || DeduplicationEngine.IsVariantOrNonStudioTrack(c.Title)) continue;
                 if (!DeduplicationEngine.IsFromOfficialArtistSource(c, artist.Name, artist.Id)) continue;
+                if (!DurationMatchesCatalog(c, cleanArtist, toleranceSec: 25)) continue;
 
                 string norm = DeduplicationEngine.NormalizeSongTitle(c.Title, cleanArtist);
                 if (!string.IsNullOrWhiteSpace(norm))
@@ -810,7 +979,8 @@ namespace SsshmulDownloader.ArtistTracker
                 if (poolByNormTitle.TryGetValue(norm, out var matches) && matches.Count > 0)
                 {
                     var best = matches.OrderByDescending(m => DeduplicationEngine.GetSongScore(m, artist.Name, artist.Id)).First();
-                    if (!seenVideoIds.Contains(best.VideoId))
+                    string normBest = DeduplicationEngine.NormalizeSongTitle(best.Title, cleanArtist);
+                    if (!seenVideoIds.Contains(best.VideoId) && (string.IsNullOrWhiteSpace(normBest) || seenTitles.Add(normBest)))
                     {
                         seenVideoIds.Add(best.VideoId);
                         resolvedSongs.Add(best);
@@ -823,7 +993,7 @@ namespace SsshmulDownloader.ArtistTracker
             }
 
             // Step D: If any specific tracks were missing from bulk scan, search ONLY the artist's Topic channel
-            if (missingTitles.Count > 0 && missingTitles.Count <= 35)
+            if (missingTitles.Count > 0 && missingTitles.Count <= 150)
             {
                 var semaphore = new SemaphoreSlim(3, 3); // 3 parallel queries with staggered timing to prevent 429 rate limits
                 var lockObj = new object();
@@ -842,7 +1012,8 @@ namespace SsshmulDownloader.ArtistTracker
                         var cleanMatches = directMatches.Where(m => 
                             !DeduplicationEngine.IsShortOrPromo(m.Title) && 
                             !DeduplicationEngine.IsVariantOrNonStudioTrack(m.Title) &&
-                            DeduplicationEngine.IsFromOfficialArtistSource(m, artist.Name, artist.Id)
+                            DeduplicationEngine.IsFromOfficialArtistSource(m, artist.Name, artist.Id) &&
+                            DurationMatchesCatalog(m, cleanArtist, toleranceSec: 25)
                         ).ToList();
 
                         if (cleanMatches.Count > 0)
@@ -872,6 +1043,231 @@ namespace SsshmulDownloader.ArtistTracker
             var finalCleanSongs = DeduplicationEngine.DeduplicateArtistSongs(resolvedSongs, artist.Name, artist.Id);
             File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Fast discography resolution finished. Matched {finalCleanSongs.Count} clean studio tracks for '{artist.Name}'.\n");
             return finalCleanSongs;
+        }
+
+        private static FileSystemWatcher? _directoryWatcher;
+        private static readonly object _watcherLock = new();
+        private static System.Threading.Timer? _debounceTimer;
+
+        public static void StartDirectoryWatcher()
+        {
+            lock (_watcherLock)
+            {
+                try
+                {
+                    _directoryWatcher?.Dispose();
+                    _directoryWatcher = null;
+
+                    string baseTrackerDir = PathUtils.GetActiveArtistTrackerDirectory();
+                    if (!Directory.Exists(baseTrackerDir))
+                    {
+                        Directory.CreateDirectory(baseTrackerDir);
+                    }
+
+                    _directoryWatcher = new FileSystemWatcher(baseTrackerDir)
+                    {
+                        NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.CreationTime | NotifyFilters.LastWrite,
+                        IncludeSubdirectories = false,
+                        EnableRaisingEvents = true
+                    };
+
+                    _directoryWatcher.Created += (s, e) => OnDirectoryWatcherEvent(e.FullPath);
+                    _directoryWatcher.Renamed += (s, e) => OnDirectoryWatcherEvent(e.FullPath);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ArtistTracker] Failed to start directory watcher: {ex.Message}");
+                }
+            }
+        }
+
+        public static void StopDirectoryWatcher()
+        {
+            lock (_watcherLock)
+            {
+                try
+                {
+                    _directoryWatcher?.Dispose();
+                    _directoryWatcher = null;
+                    _debounceTimer?.Dispose();
+                    _debounceTimer = null;
+                }
+                catch { }
+            }
+        }
+
+        private static void OnDirectoryWatcherEvent(string fullPath)
+        {
+            if (!Directory.Exists(fullPath)) return;
+            lock (_watcherLock)
+            {
+                _debounceTimer?.Dispose();
+                _debounceTimer = new System.Threading.Timer(async _ =>
+                {
+                    try
+                    {
+                        await SyncArtistsFromTargetDirectoryAsync(triggerScan: true);
+                    }
+                    catch { }
+                }, null, 1500, Timeout.Infinite);
+            }
+        }
+
+        public static async Task<int> SyncArtistsFromTargetDirectoryAsync(string? targetDir = null, bool triggerScan = false)
+        {
+            await Task.Yield();
+            string baseTrackerDir = !string.IsNullOrWhiteSpace(targetDir)
+                ? targetDir
+                : PathUtils.GetActiveArtistTrackerDirectory();
+
+            if (!Directory.Exists(baseTrackerDir))
+            {
+                try { Directory.CreateDirectory(baseTrackerDir); } catch { return 0; }
+            }
+
+            string logFile = PathUtils.GetLogFilePath();
+            try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Syncing artist folders from target directory: '{baseTrackerDir}'\n"); } catch { }
+
+            string[] subDirs;
+            try
+            {
+                subDirs = Directory.GetDirectories(baseTrackerDir);
+            }
+            catch (Exception ex)
+            {
+                try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Error listing subdirectories in '{baseTrackerDir}': {ex.Message}\n"); } catch { }
+                return 0;
+            }
+
+            var existingArtists = ArtistStore.GetAll();
+            var audioExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".mp3", ".m4a", ".mp4", ".opus", ".flac", ".wav", ".aac", ".webm", ".ogg"
+            };
+
+            int syncedCount = 0;
+            var newlyAddedArtists = new List<TrackedArtist>();
+
+            foreach (var subDir in subDirs)
+            {
+                try
+                {
+                    string folderName = Path.GetFileName(subDir);
+                    if (string.IsNullOrWhiteSpace(folderName) || folderName.StartsWith(".") || folderName.StartsWith("$"))
+                    {
+                        continue;
+                    }
+
+                    string cleanFolderName = DeduplicationEngine.CleanArtistName(folderName);
+
+                    // Check if matched to an existing tracked artist
+                    var match = existingArtists.FirstOrDefault(a =>
+                        string.Equals(a.DownloadFolder, subDir, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.Name, folderName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(DeduplicationEngine.CleanArtistName(a.Name), cleanFolderName, StringComparison.OrdinalIgnoreCase));
+
+                    if (match != null)
+                    {
+                        // Ensure folder path is up to date
+                        match.DownloadFolder = subDir;
+
+                        // Check files on disk
+                        var filesOnDisk = Directory.GetFiles(subDir)
+                            .Where(f => audioExtensions.Contains(Path.GetExtension(f)))
+                            .ToList();
+
+                        var matchedFilesSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var f in filesOnDisk)
+                        {
+                            string fileNameNoExt = Path.GetFileNameWithoutExtension(f);
+                            foreach (var song in match.RecentSongs)
+                            {
+                                if (DeduplicationEngine.IsFileMatchingSong(fileNameNoExt, song.Title, cleanFolderName))
+                                {
+                                    song.IsDownloaded = true;
+                                    song.FilePath = f;
+                                    matchedFilesSet.Add(f);
+                                }
+                            }
+                        }
+
+                        // Add any local disk files not already present in RecentSongs
+                        foreach (var f in filesOnDisk)
+                        {
+                            if (!matchedFilesSet.Contains(f))
+                            {
+                                string fileNameNoExt = Path.GetFileNameWithoutExtension(f);
+                                bool alreadyHas = match.RecentSongs.Any(s => 
+                                    string.Equals(s.FilePath, f, StringComparison.OrdinalIgnoreCase) ||
+                                    DeduplicationEngine.IsFileMatchingSong(fileNameNoExt, s.Title, cleanFolderName));
+                                if (!alreadyHas)
+                                {
+                                    match.RecentSongs.Add(new ArtistSong(
+                                        videoId: "local_" + Math.Abs(fileNameNoExt.GetHashCode()),
+                                        title: fileNameNoExt,
+                                        url: "",
+                                        uploadDate: "",
+                                        duration: "",
+                                        thumbnail: "",
+                                        isOfficialAudio: true,
+                                        uploader: match.Name
+                                    )
+                                    {
+                                        IsDownloaded = true,
+                                        FilePath = f,
+                                        DownloadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                    });
+                                }
+                            }
+                        }
+
+                        match.NewSongsCount = match.RecentSongs.Count(s => !s.IsDownloaded);
+                        ArtistStore.Save(match);
+                        syncedCount++;
+                    }
+                    else
+                    {
+                        // Folder exists on disk but artist is not tracked in the application.
+                        // We do NOT automatically add artists from disk into tracking.
+                        // Only artists explicitly added by the user in the app will sync with folders.
+                        continue;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Error processing subfolder '{subDir}': {ex.Message}\n"); } catch { }
+                }
+            }
+
+            // Broadcast full updated list
+            DownloadManager.Instance.Broadcast(new DownloadMessage("artist_list")
+            {
+                Artists = ArtistStore.GetAll()
+            });
+
+            return syncedCount;
+        }
+
+        // Catalog durations (seconds) keyed by "artist|normalizedTitle" for length-based matching
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _catalogDurations = new(StringComparer.OrdinalIgnoreCase);
+
+        private static string GetDurationSeconds(JsonElement elem)
+        {
+            if (elem.TryGetProperty("duration", out var d))
+            {
+                if (d.ValueKind == JsonValueKind.Number && d.TryGetDouble(out var v)) return ((int)Math.Round(v)).ToString();
+                if (d.ValueKind == JsonValueKind.String) return d.GetString() ?? "";
+            }
+            return "";
+        }
+
+        // True if candidate length is unknown or within tolerance of catalog length (or no catalog length known)
+        private static bool DurationMatchesCatalog(ArtistSong song, string cleanArtist, int toleranceSec = 12)
+        {
+            string norm = DeduplicationEngine.NormalizeSongTitle(song.Title, cleanArtist);
+            if (!_catalogDurations.TryGetValue(cleanArtist + "|" + norm, out int catSec) || catSec <= 0) return true;
+            if (!int.TryParse(song.Duration, out int sec) || sec <= 0) return true;
+            return Math.Abs(sec - catSec) <= toleranceSec;
         }
 
         private static string? GetStringProp(JsonElement elem, string prop)

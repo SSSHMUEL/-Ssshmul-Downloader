@@ -2,7 +2,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
+using SsshmulDownloader.ArtistTracker;
 using SsshmulDownloader.Models;
 
 namespace SsshmulDownloader.Storage
@@ -42,6 +44,10 @@ namespace SsshmulDownloader.Storage
         {
             Init();
             if (string.IsNullOrEmpty(artist.Id)) return;
+            if (string.IsNullOrWhiteSpace(artist.DownloadFolder) && !string.IsNullOrWhiteSpace(artist.Name))
+            {
+                artist.DownloadFolder = PathUtils.GetArtistDirectory(artist.Name);
+            }
             _artistsMap[artist.Id] = artist;
             Persist();
         }
@@ -100,6 +106,53 @@ namespace SsshmulDownloader.Storage
                         {
                             if (!string.IsNullOrEmpty(a.Id))
                             {
+                                string artistFolder = !string.IsNullOrWhiteSpace(a.DownloadFolder)
+                                    ? a.DownloadFolder
+                                    : PathUtils.GetArtistDirectory(a.Name);
+
+                                var onDiskFiles = Directory.Exists(artistFolder)
+                                    ? new HashSet<string>(Directory.GetFiles(artistFolder).Select(f => Path.GetFileName(f) ?? ""), StringComparer.OrdinalIgnoreCase)
+                                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                                string downloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                                var downloadsFiles = Directory.Exists(downloadsDir)
+                                    ? new HashSet<string>(Directory.GetFiles(downloadsDir).Select(f => Path.GetFileName(f) ?? ""), StringComparer.OrdinalIgnoreCase)
+                                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                                string cleanName = DeduplicationEngine.CleanArtistName(a.Name);
+                                foreach (var song in a.RecentSongs)
+                                {
+                                    bool fileExists = !string.IsNullOrWhiteSpace(song.FilePath) && File.Exists(song.FilePath);
+                                    if (!fileExists)
+                                    {
+                                        // Check if file exists in artist directory or downloads directory
+                                        string matchInArtist = onDiskFiles.FirstOrDefault(f => DeduplicationEngine.IsFileMatchingSong(Path.GetFileNameWithoutExtension(f), song.Title, cleanName)) ?? "";
+                                        if (!string.IsNullOrEmpty(matchInArtist))
+                                        {
+                                            song.FilePath = Path.Combine(artistFolder, matchInArtist);
+                                            song.IsDownloaded = true;
+                                            fileExists = true;
+                                        }
+                                        else
+                                        {
+                                            string matchInDl = downloadsFiles.FirstOrDefault(f => DeduplicationEngine.IsFileMatchingSong(Path.GetFileNameWithoutExtension(f), song.Title, cleanName)) ?? "";
+                                            if (!string.IsNullOrEmpty(matchInDl))
+                                            {
+                                                song.FilePath = Path.Combine(downloadsDir, matchInDl);
+                                                song.IsDownloaded = true;
+                                                fileExists = true;
+                                            }
+                                        }
+                                    }
+
+                                    if (!fileExists && song.IsDownloaded)
+                                    {
+                                        song.IsDownloaded = false;
+                                        song.FilePath = null;
+                                    }
+                                }
+
+                                a.NewSongsCount = a.RecentSongs.Count(s => !s.IsDownloaded);
                                 _artistsMap[a.Id] = a;
                             }
                         }
