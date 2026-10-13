@@ -773,6 +773,35 @@ namespace SsshmulDownloader.Engine
                         }
                     }
 
+                    // Sanitize tags for all audio files before moving
+                    if (!isVideo)
+                    {
+                        try
+                        {
+                            var audioFiles = Directory.GetFiles(tempDir)
+                                .Where(f =>
+                                {
+                                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                                    return ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" ||
+                                           ext == ".opus" || ext == ".ogg" || ext == ".aac";
+                                })
+                                .ToList();
+
+                            foreach (var af in audioFiles)
+                            {
+                                SanitizeAudioFileMetadata(af, ctx);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            try
+                            {
+                                File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [MetadataSanitizer] Top-level ERROR: {ex.Message}\n");
+                            }
+                            catch { }
+                        }
+                    }
+
                     string finalPath = MoveFilesSafely(tempDir, targetFolder, isEmbedSubs, !isVideo);
                     try
                     {
@@ -1053,7 +1082,12 @@ namespace SsshmulDownloader.Engine
                     }
                     else if (isAudio && (ext == ".mp3" || ext == ".m4a" || ext == ".flac" || ext == ".wav" || ext == ".opus" || ext == ".ogg" || ext == ".aac"))
                     {
-                        if (!string.IsNullOrWhiteSpace(baseMediaCleanName))
+                        string cleanedIndividualName = SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanSongTitle(nameWithoutExt);
+                        if (!string.IsNullOrWhiteSpace(cleanedIndividualName))
+                        {
+                            nameWithoutExt = cleanedIndividualName;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(baseMediaCleanName))
                         {
                             nameWithoutExt = baseMediaCleanName;
                         }
@@ -1155,6 +1189,248 @@ namespace SsshmulDownloader.Engine
                 try
                 {
                     File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [EmbedLyrics] ERROR: {ex.Message}\n");
+                }
+                catch { }
+            }
+        }
+
+        public static void SanitizeAudioFileMetadata(string audioPath, DownloadContext ctx)
+        {
+            try
+            {
+                if (!File.Exists(audioPath)) return;
+
+                TagLib.Id3v2.Tag.DefaultVersion = 3;
+                TagLib.Id3v2.Tag.ForceDefaultVersion = true;
+
+                using (var tf = TagLib.File.Create(audioPath))
+                {
+                    bool removeTrack = false;
+                    bool removeDisc = false;
+                    bool removeAlbum = false;
+                    bool removeGenre = false;
+                    bool removeYear = false;
+                    bool removeComment = false;
+
+                    // 1. Clean Title: strip "Official Audio", "Official Video", brackets, etc.
+                    string currentTitle = !string.IsNullOrWhiteSpace(tf.Tag.Title)
+                        ? tf.Tag.Title
+                        : (!string.IsNullOrWhiteSpace(ctx.CustomTitle) ? ctx.CustomTitle : Path.GetFileNameWithoutExtension(audioPath));
+
+                    string cleanedTitle = SsshmulDownloader.ArtistTracker.DeduplicationEngine.CleanSongTitle(currentTitle);
+                    if (!string.IsNullOrWhiteSpace(cleanedTitle))
+                    {
+                        tf.Tag.Title = cleanedTitle;
+                    }
+
+                    // Determine Artist Name:
+                    // 1. Prioritize artist folder name (e.g. "Alex Clare", "David Kushner")
+                    string? artistName = null;
+                    string dirName = Path.GetFileName(Path.GetDirectoryName(audioPath) ?? "");
+                    if (!string.IsNullOrWhiteSpace(dirName) &&
+                        !dirName.Equals("Downloads", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.Equals("Music", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.Equals("מוזיקה", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.Equals("שירים", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.Equals("SsshmulMusic", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.Equals("Temp", StringComparison.OrdinalIgnoreCase) &&
+                        !dirName.StartsWith("Ssshmul_DL_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        artistName = dirName;
+                    }
+
+                    // Fallback to ctx.DestinationPath directory name
+                    if (string.IsNullOrWhiteSpace(artistName) && !string.IsNullOrWhiteSpace(ctx.DestinationPath))
+                    {
+                        string destDir = Path.GetFileName(ctx.DestinationPath.TrimEnd('\\', '/'));
+                        if (!string.IsNullOrWhiteSpace(destDir) &&
+                            !destDir.Equals("Downloads", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.Equals("Music", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.Equals("מוזיקה", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.Equals("שירים", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.Equals("SsshmulMusic", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.Equals("Temp", StringComparison.OrdinalIgnoreCase) &&
+                            !destDir.StartsWith("Ssshmul_DL_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            artistName = destDir;
+                        }
+                    }
+
+                    // 2. Fallback to Performers tag if directory name is generic
+                    if (string.IsNullOrWhiteSpace(artistName) && tf.Tag.Performers != null && tf.Tag.Performers.Length > 0 && !string.IsNullOrWhiteSpace(tf.Tag.FirstPerformer))
+                    {
+                        string p = tf.Tag.FirstPerformer.Trim();
+                        if (p != "0" && !p.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !p.Equals("none", StringComparison.OrdinalIgnoreCase) && !p.Equals("[לא ידוע]", StringComparison.OrdinalIgnoreCase))
+                        {
+                            artistName = p;
+                        }
+                    }
+
+                    // 3. Fallback from title if title contains " - "
+                    if (string.IsNullOrWhiteSpace(artistName) && !string.IsNullOrWhiteSpace(currentTitle) && currentTitle.Contains(" - "))
+                    {
+                        string possibleArtist = currentTitle.Split(" - ")[0].Trim();
+                        if (!string.IsNullOrWhiteSpace(possibleArtist))
+                        {
+                            artistName = possibleArtist;
+                        }
+                    }
+
+                    // Ensure Artist is properly set
+                    if (!string.IsNullOrWhiteSpace(artistName))
+                    {
+                        tf.Tag.Performers = new[] { artistName };
+                        if (tf.Tag.AlbumArtists == null || tf.Tag.AlbumArtists.Length == 0 || string.IsNullOrWhiteSpace(tf.Tag.FirstAlbumArtist) || tf.Tag.FirstAlbumArtist == "0")
+                        {
+                            tf.Tag.AlbumArtists = new[] { artistName };
+                        }
+                    }
+
+                    // 2. Clean Album: Always set Album strictly to the Artist Name!
+                    bool isAlbumExplicitlyDisabled = ctx.TagMappings != null && ctx.TagMappings.Album == "none";
+
+                    if (isAlbumExplicitlyDisabled)
+                    {
+                        tf.Tag.Album = null;
+                        removeAlbum = true;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(artistName))
+                    {
+                        tf.Tag.Album = artistName;
+                        removeAlbum = false;
+                    }
+                    else
+                    {
+                        tf.Tag.Album = null;
+                        removeAlbum = true;
+                    }
+
+                    // 3. Clean Genre: YouTube assigns category "Music", which is generic.
+                    // If Genre is "Music", "General", "None", "0", or empty -> leave completely blank!
+                    if (tf.Tag.Genres != null && tf.Tag.Genres.Length > 0)
+                    {
+                        var realGenres = tf.Tag.Genres
+                            .Where(g => !string.IsNullOrWhiteSpace(g) &&
+                                        !g.Trim().Equals("Music", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("Entertainment", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("General", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("None", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("0", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
+                                        !g.Trim().Equals("[לא ידוע]", StringComparison.OrdinalIgnoreCase))
+                            .Select(g => g.Trim())
+                            .ToArray();
+
+                        if (realGenres.Length > 0)
+                        {
+                            tf.Tag.Genres = realGenres;
+                        }
+                        else
+                        {
+                            tf.Tag.Genres = Array.Empty<string>();
+                            removeGenre = true;
+                        }
+                    }
+                    else
+                    {
+                        removeGenre = true;
+                    }
+
+                    // 4. Track Number: if 0, or if it is a single track download without an authentic playlist track number -> remove!
+                    bool isRealTrack = !string.IsNullOrWhiteSpace(ctx.PlaylistTitle) && tf.Tag.Track > 0;
+                    if (!isRealTrack || tf.Tag.Track == 0)
+                    {
+                        tf.Tag.Track = 0;
+                        tf.Tag.TrackCount = 0;
+                        removeTrack = true;
+                    }
+
+                    // 5. Disc Number: single tracks should never have fake 1 or 0 -> remove!
+                    bool isRealMultiDisc = tf.Tag.DiscCount > 1 && tf.Tag.Disc > 0;
+                    if (!isRealMultiDisc)
+                    {
+                        tf.Tag.Disc = 0;
+                        tf.Tag.DiscCount = 0;
+                        removeDisc = true;
+                    }
+
+                    // 6. Year: if 0 -> remove!
+                    if (tf.Tag.Year == 0)
+                    {
+                        tf.Tag.Year = 0;
+                        removeYear = true;
+                    }
+
+                    // 7. Comment: remove raw YouTube link unless explicitly requested
+                    bool userExplicitlyWantedUrl = ctx.TagMappings != null && ctx.TagMappings.Comment == "url";
+                    bool userExplicitlyWantedDesc = ctx.TagMappings != null && ctx.TagMappings.Comment == "description";
+                    string? comment = tf.Tag.Comment?.Trim();
+
+                    if (!string.IsNullOrWhiteSpace(comment))
+                    {
+                        bool isRawUrl = comment.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                                        comment.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                                        comment.Contains("youtube.com", StringComparison.OrdinalIgnoreCase) ||
+                                        comment.Contains("youtu.be", StringComparison.OrdinalIgnoreCase);
+
+                        if (comment == "0" || (!userExplicitlyWantedUrl && !userExplicitlyWantedDesc && isRawUrl))
+                        {
+                            tf.Tag.Comment = null;
+                            removeComment = true;
+                        }
+                    }
+
+                    // 8. Clean Artist / Performers if "0"
+                    if (tf.Tag.Performers != null && tf.Tag.Performers.Length > 0)
+                    {
+                        var realPerformers = tf.Tag.Performers
+                            .Where(p => !string.IsNullOrWhiteSpace(p) && p.Trim() != "0" &&
+                                        !p.Trim().Equals("unknown", StringComparison.OrdinalIgnoreCase) &&
+                                        !p.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                                        !p.Trim().Equals("[לא ידוע]", StringComparison.OrdinalIgnoreCase))
+                            .Select(p => p.Trim())
+                            .ToArray();
+
+                        tf.Tag.Performers = realPerformers;
+                    }
+
+                    // 9. Remove exact ID3v2 frames if tag is ID3v2
+                    if (tf.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3)
+                    {
+                        var toRemove = id3.GetFrames().Where(f =>
+                        {
+                            string fid = f.FrameId != null ? f.FrameId.ToString() : "";
+                            return (removeTrack && fid == "TRCK") ||
+                                   (removeDisc && fid == "TPOS") ||
+                                   (removeAlbum && fid == "TALB") ||
+                                   (removeGenre && fid == "TCON") ||
+                                   (removeYear && (fid == "TYER" || fid == "TDRC")) ||
+                                   (removeComment && fid == "COMM");
+                        }).ToList();
+
+                        foreach (var f in toRemove)
+                        {
+                            id3.RemoveFrame(f);
+                        }
+                    }
+
+                    // Strip obsolete ID3v1 tags to prevent 0-byte track numbers or truncated fields
+                    tf.RemoveTags(TagLib.TagTypes.Id3v1);
+
+                    tf.Save();
+                }
+
+                try
+                {
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [MetadataSanitizer] Sanitized audio tags for {Path.GetFileName(audioPath)}\n");
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    File.AppendAllText(PathUtils.GetLogFilePath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [MetadataSanitizer] ERROR in {Path.GetFileName(audioPath)}: {ex.Message}\n");
                 }
                 catch { }
             }
@@ -1588,7 +1864,7 @@ namespace SsshmulDownloader.Engine
                 if (mergedSb.Length > 0)
                 {
                     // Determine base clean name
-                    string firstMediaFile = Directory.GetFiles(dir)
+                    string? firstMediaFile = Directory.GetFiles(dir)
                         .FirstOrDefault(f => !f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase) &&
                                              !f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) &&
                                              !f.EndsWith(".lrc", StringComparison.OrdinalIgnoreCase) &&

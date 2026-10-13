@@ -39,12 +39,22 @@ namespace SsshmulDownloader.ArtistTracker
             // Strip video tags, brackets, and common video-only indicators (repeat to handle adjacent brackets)
             for (int i = 0; i < 2; i++)
             {
-                clean = Regex.Replace(clean, @"\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\]", "", RegexOptions.IgnoreCase);
-                clean = Regex.Replace(clean, @"\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\)", "", RegexOptions.IgnoreCase);
-                clean = Regex.Replace(clean, @"\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|גרסת\s*אולפן|מילים|רשמי|visualizer)\s*\}", "", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\s*\[\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|שיר\s*רשמי|קליפ\s*מילים|גרסת\s*אולפן|מילים|רשמי|visualizer|official\s*visualizer|audio|audio\s*only|full\s*audio|hq\s*audio|audio\s*video)\s*\]", "", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\s*\(\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|שיר\s*רשמי|קליפ\s*מילים|גרסת\s*אולפן|מילים|רשמי|visualizer|official\s*visualizer|audio|audio\s*only|full\s*audio|hq\s*audio|audio\s*video)\s*\)", "", RegexOptions.IgnoreCase);
+                clean = Regex.Replace(clean, @"\s*\{\s*(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*lyrics?|official|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|lyrics?|4k|hd|1080p|קליפ\s*רשמי|קליפ|אודיו\s*רשמי|אודיו|שיר\s*רשמי|קליפ\s*מילים|גרסת\s*אולפן|מילים|רשמי|visualizer|official\s*visualizer|audio|audio\s*only|full\s*audio|hq\s*audio|audio\s*video)\s*\}", "", RegexOptions.IgnoreCase);
             }
 
-            clean = Regex.Replace(clean, @"\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|visualizer)\b", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\b(?:official\s*(?:music\s*|lyric\s*|lyrics\s*)?video|music\s*video|official\s*audio|official\s*track|official\s*visualizer|video\s*clip|clip\s*officiel|lyric\s*video|lyrics\s*video|official\s*lyrics|קליפ\s*רשמי|אודיו\s*רשמי|שיר\s*רשמי|קליפ\s*מילים|visualizer)\b", "", RegexOptions.IgnoreCase);
+
+            // Strip channel/multi-artist pipe lists (e.g. "Back of the Wagon | Matisyahu | Afiko.man | Alex Clare | TYH Nation")
+            if (clean.Contains(" | "))
+            {
+                var pipeParts = clean.Split(new[] { " | " }, StringSplitOptions.RemoveEmptyEntries);
+                if (pipeParts.Length > 1 && !string.IsNullOrWhiteSpace(pipeParts[0]))
+                {
+                    clean = pipeParts[0].Trim();
+                }
+            }
 
             // Clean redundant extra spaces and trailing/leading separators
             clean = Regex.Replace(clean, @"[\s\-_|:]+$", "");

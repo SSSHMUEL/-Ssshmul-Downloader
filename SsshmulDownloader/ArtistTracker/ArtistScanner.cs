@@ -635,9 +635,28 @@ namespace SsshmulDownloader.ArtistTracker
                 if (!string.IsNullOrWhiteSpace(key))
                 {
                     if (!startedKeys.Add(key) || activeTitles.Contains(key)) continue;
-                    if (filesOnDisk.Any(f => f != null &&
-                        string.Equals(DeduplicationEngine.NormalizeSongTitle(f, cleanName), key, StringComparison.OrdinalIgnoreCase)))
+                    string? existingFile = filesOnDisk.FirstOrDefault(f => f != null &&
+                        string.Equals(DeduplicationEngine.NormalizeSongTitle(f, cleanName), key, StringComparison.OrdinalIgnoreCase));
+                    if (existingFile != null)
+                    {
+                        if (!isVideo)
+                        {
+                            try
+                            {
+                                string existingPath = Path.Combine(destFolder, existingFile);
+                                if (File.Exists(existingPath))
+                                {
+                                    YtDlpProcess.SanitizeAudioFileMetadata(existingPath, new DownloadContext
+                                    {
+                                        DestinationPath = destFolder,
+                                        CustomTitle = song.Title
+                                    });
+                                }
+                            }
+                            catch { }
+                        }
                         continue;
+                    }
                 }
 
                 string downloadId = $"artist_{song.VideoId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
@@ -1133,16 +1152,31 @@ namespace SsshmulDownloader.ArtistTracker
             string logFile = PathUtils.GetLogFilePath();
             try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Syncing artist folders from target directory: '{baseTrackerDir}'\n"); } catch { }
 
-            string[] subDirs;
-            try
+            var trackerRoots = new List<string> { baseTrackerDir };
+            string userMusicSsshmul = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Music", "SsshmulMusic");
+            if (Directory.Exists(userMusicSsshmul) && !trackerRoots.Contains(userMusicSsshmul, StringComparer.OrdinalIgnoreCase))
             {
-                subDirs = Directory.GetDirectories(baseTrackerDir);
+                trackerRoots.Add(userMusicSsshmul);
             }
-            catch (Exception ex)
+            string defaultMusicDir = PathUtils.GetDefaultMusicDirectory();
+            if (Directory.Exists(defaultMusicDir) && !trackerRoots.Contains(defaultMusicDir, StringComparer.OrdinalIgnoreCase))
             {
-                try { File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [Artist] Error listing subdirectories in '{baseTrackerDir}': {ex.Message}\n"); } catch { }
-                return 0;
+                trackerRoots.Add(defaultMusicDir);
             }
+
+            var subDirsList = new List<string>();
+            foreach (var root in trackerRoots)
+            {
+                if (Directory.Exists(root))
+                {
+                    try
+                    {
+                        subDirsList.AddRange(Directory.GetDirectories(root));
+                    }
+                    catch { }
+                }
+            }
+            string[] subDirs = subDirsList.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
             var existingArtists = ArtistStore.GetAll();
             var audioExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1196,9 +1230,18 @@ namespace SsshmulDownloader.ArtistTracker
                             }
                         }
 
-                        // Add any local disk files not already present in RecentSongs
+                        // Add any local disk files not already present in RecentSongs and sanitize metadata
                         foreach (var f in filesOnDisk)
                         {
+                            try
+                            {
+                                YtDlpProcess.SanitizeAudioFileMetadata(f, new DownloadContext
+                                {
+                                    DestinationPath = subDir
+                                });
+                            }
+                            catch { }
+
                             if (!matchedFilesSet.Contains(f))
                             {
                                 string fileNameNoExt = Path.GetFileNameWithoutExtension(f);
